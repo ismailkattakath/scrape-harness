@@ -1,0 +1,53 @@
+name: ✨ Feature request
+description: Propose a new capability or a change to an existing one
+labels: ['enhancement', 'needs triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Requests that keep the safety model intact land much faster. Anything
+        that weakens an approval, the politeness ceiling or the stop on a
+        challenge needs a very strong reason, stated up front.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you cannot do today, concretely. Not the solution yet.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: The proposal
+      description: What should change, and how a user would run it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: An existing tool, option or pattern that already does this, and why it does not fit.
+
+  - type: dropdown
+    id: safety
+    attributes:
+      label: Does it touch networked behaviour?
+      options:
+        - No, offline only
+        - Yes, and every safety check still applies
+        - Yes, and it changes a safety check (explain above)
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmations
+      options:
+        - label: I checked no open issue already covers this
+          required: true
+        - label: This request contains no crawled data, real URLs or secrets
+          required: true

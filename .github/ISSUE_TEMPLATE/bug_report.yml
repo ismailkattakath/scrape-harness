@@ -1,0 +1,87 @@
+name: 🐛 Bug report
+description: A command fails, misbehaves, or a gate passes when it should refuse
+labels: ['bug', 'needs triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before filing:** a refusal is often the intended behaviour (no approval,
+        a challenge stop, a cooldown, a failed egress preflight). The exit code
+        and the run card say which. A gate that lets something through it should
+        refuse is a defect, and worth reporting.
+
+        **Do not report security issues here.** Use
+        [private reporting](https://github.com/ismailkattakath/scrape-harness/security/advisories/new).
+
+        **Never paste data:** no crawled pages, records, real URLs or site names.
+        Reproduce on the synthetic example or a test fixture.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The flake revision you ran (the run card prints it), or the commit sha.
+      placeholder: 0.1.0 @ abc1234
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      description: The command you ran, with its arguments. Redact anything private.
+      placeholder: <cli> crawl-lists --dry-run
+    validations:
+      required: true
+
+  - type: input
+    id: exit
+    attributes:
+      label: Exit code
+      placeholder: '3'
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+      description: What you expected, and what you got.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: On the synthetic example or a test fixture, not a live site.
+      placeholder: |
+        1. nix develop
+        2. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The run card and the error, with paths and hosts redacted.
+      render: text
+
+  - type: input
+    id: env
+    attributes:
+      label: System and Nix
+      placeholder: aarch64-darwin · Determinate Nix 3.x
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmations
+      options:
+        - label: I reproduced this on the latest `main`
+          required: true
+        - label: This report contains no crawled data, real URLs or secrets
+          required: true

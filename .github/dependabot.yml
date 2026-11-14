@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # GitHub Actions only: every action in .github/workflows is pinned by commit sha, and
+  # Dependabot is what moves those pins. The Nix inputs (flake.lock) are bumped by hand.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: 'ci'
