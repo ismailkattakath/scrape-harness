@@ -71,7 +71,12 @@ jobs:
       # Every output on every declared system, built nowhere: the darwin target included.
       - name: nix flake check --all-systems --no-build
         run: nix flake check --all-systems --no-build
-      # This runner's system (x86_64-linux), built: the package (pytest), lint, schema and
+      # Ubuntu 23.10+ (so ubuntu-24.04) has AppArmor deny unprivileged user namespaces, which
+      # Chromium's sandbox needs: the browser tests die at launch (SIGTRAP) without this. A
+      # throwaway runner, so turning the restriction off here changes nothing else.
+      - name: allow unprivileged user namespaces (Chromium's sandbox)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # This runner's system (aarch64-linux), built: the package (pytest), lint, schema and
       # template gates, formatting.
       - name: nix flake check
         run: nix flake check --print-build-logs
