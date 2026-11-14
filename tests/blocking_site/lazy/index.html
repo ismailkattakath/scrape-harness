@@ -1,0 +1,55 @@
+<!doctype html><html><head><link rel="stylesheet" href="/lazy/img/s.css">
+<style>body{margin:0;width:1200px} img{display:block;max-width:100%}</style></head><body><h1>cards</h1>
+<div class="card"><img loading="lazy" src="/lazy/img/n0.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n1.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n2.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n3.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n4.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n5.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n6.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n7.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n8.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n9.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n10.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n11.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n12.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n13.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n14.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n15.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n16.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n17.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n18.png"></div>
+<div class="card"><img loading="lazy" src="/lazy/img/n19.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d0.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d1.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d2.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d3.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d4.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d5.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d6.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d7.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d8.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d9.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d10.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d11.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d12.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d13.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d14.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d15.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d16.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d17.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d18.png"></div>
+<div class="card"><img class="lz" data-src="/lazy/img/d19.png"></div>
+<script>
+// a common lazy loader: IntersectionObserver + data-src, and a retry on error (twice)
+const io = new IntersectionObserver(es => es.forEach(e => {
+  if (!e.isIntersecting) return; const im = e.target; io.unobserve(im); let tries = 0;
+  im.onerror = () => { if (tries++ < 2) setTimeout(() => { im.src = im.dataset.src + "?retry=" + tries; }, 50); };
+  im.src = im.dataset.src;
+}), {rootMargin: "200px"});
+document.querySelectorAll("img.lz").forEach(im => io.observe(im));
+window.__probe = () => ({
+  errored: [...document.images].filter(i => i.complete && i.naturalWidth === 0 && i.getAttribute("src")).length,
+  height: document.body.scrollHeight,
+});
+</script></body></html>

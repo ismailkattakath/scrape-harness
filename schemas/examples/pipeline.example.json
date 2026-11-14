@@ -1,0 +1,27 @@
+{
+  "schema": "pipeline.v1",
+  "name": "example",
+  "consumer": {
+    "cli": "ex",
+    "env_prefix": "EX",
+    "data_env": "EXAMPLE_DATA",
+    "state_env": "EXAMPLE_STATE",
+    "state_dirname": "example",
+    "default_site": "example.invalid",
+    "default_region": "sample-region",
+    "approval_key_fingerprint": "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "secret_envs": [],
+    "site_hosts": ["example.invalid"]
+  },
+  "groups": { "run": ["DATA:runs/{run_file}.json", "DATA:events.jsonl"] },
+  "plan_outputs": ["STATE:plans/{plan_hash}.json"],
+  "stages": [
+    { "name": "crawl-lists", "network": "site", "inputs": [], "outputs": ["DATA:items.jsonl", "@run"] },
+    { "name": "reparse", "network": "none", "inputs": ["DATA:raw/"], "outputs": ["DATA:items.jsonl"] }
+  ],
+  "utilities": [
+    { "name": "browser open", "network": "site", "operator_only": true, "inputs": [], "outputs": [] }
+  ],
+  "files": { "items": { "path": "items.jsonl", "schema": "item.v1" } },
+  "offline_flags": ["--dry-run", "--driver fixture"]
+}

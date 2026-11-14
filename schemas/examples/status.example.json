@@ -1,0 +1,15 @@
+{
+  "schema": "status.v1",
+  "run_id": "2026-01-15T12:00:00Z-fetch-ads-desktop-abc123",
+  "command": "fetch-ads",
+  "stage": "2/3",
+  "status": "running",
+  "created_at": "2026-01-15T12:00:00Z",
+  "updated_at": "2026-01-15T12:10:00Z",
+  "pid": 4242,
+  "requests": { "list_pages": 0, "ad_pages": 70, "robots": 1, "other": 0, "egress_trace": 1 },
+  "planned": 600,
+  "per_minute": 7,
+  "challenges": 0,
+  "log": "/DATA/runs/2026-01-15T12_00_00Z-fetch-ads-desktop-abc123.log.jsonl"
+}

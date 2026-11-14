@@ -1,0 +1,172 @@
+"""STATE/status.json: the ONE live status of the latest run, for the statusline, the monitor and agents.
+
+Files are truth, messages are doorbells: the run record (DATA/runs/<run>.json) and its live log stay the
+record; this file is a small, overwritten, machine-local mirror of "what is running right now", written
+atomically on every run-record save and after every page. It never holds data, only counts and paths.
+Stdlib only and Python 3.9-compatible, because `<cli> claude-settings --write` also renders THIS file
+(plus the consumer's names) into the project's .claude/statusline.py, which Claude Code runs with the
+system python3 and no dev shell: the status line must not depend on PATH finding the consumer's CLI.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+STALE_S = 600  # a "running" status untouched this long, whose process is gone, is shown as stale
+
+
+def path() -> Path:
+    from . import store
+
+    return store.state_dir() / "status.json"
+
+
+def _utc() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def from_run(doc: dict, live: dict | None = None) -> dict:
+    """status.v1 from a run record (+ the attempt's live request counts, which a resume adds to)."""
+    card = doc.get("card") or {}
+    scale = card.get("scale") or {}
+    req = dict(doc.get("requests") or {})
+    for k, v in (live or {}).items():
+        req[k] = req.get(k, 0) + v
+    return {
+        "schema": "status.v1",
+        "run_id": doc["run_id"],
+        "command": doc["command"],
+        "stage": card.get("stage") or "utility",
+        "status": doc["status"],
+        "created_at": doc["created_at"],
+        "updated_at": _utc(),
+        "pid": os.getpid(),
+        "requests": req,
+        "planned": sum((scale.get("planned") or {}).values()),
+        "per_minute": scale.get("per_minute"),
+        "challenges": doc.get("challenges", 0),
+        "log": (card.get("live_log") or {}).get("path"),
+    }
+
+
+def write(doc: dict, live: dict | None = None) -> None:
+    """Atomic overwrite (temp + rename): a reader never sees half a file. Never raises into a run."""
+    try:
+        from . import contracts
+
+        st = contracts.validate("status.v1", from_run(doc, live))
+        p = path()
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(json.dumps(st, sort_keys=True) + "\n")
+        tmp.replace(p)
+    except Exception:  # noqa: BLE001 - a status mirror must never stop a crawl
+        pass
+
+
+def read_path() -> Path:
+    """Where to READ the status: the state root without the DATA-root checks (a status line must work
+    in a shell that has no DATA root set). Writing goes through store.state_dir(), which checks."""
+    from . import pipeline, store
+
+    raw = os.environ.get(pipeline.consumer().state_env)
+    return (Path(raw).expanduser() if raw else store.default_state_dir()) / "status.json"
+
+
+def read() -> dict | None:
+    try:
+        return json.loads(read_path().read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _alive(pid: int | None) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def open_incident_count(state_root: Path) -> int:
+    """Unacked incidents in STATE/ops/incidents.jsonl (stdlib: the launcher runs it without the package)."""
+    try:
+        rows = [
+            json.loads(x)
+            for x in (state_root / "ops" / "incidents.jsonl").read_text().splitlines()
+            if x.strip()
+        ]
+    except (OSError, ValueError):
+        return 0
+    acked = {r.get("id") for r in rows if r.get("event") == "acked"}
+    return sum(1 for r in rows if r.get("event") == "opened" and r.get("id") not in acked)
+
+
+def with_incidents(text: str, n: int) -> str:
+    return f"{text} · ⚠ {n} open incident{'s' if n != 1 else ''}" if n else text
+
+
+def line(st: dict | None, cli: str, now: float | None = None) -> str:
+    """One status line: `<cli> · fetch-ads 2/3 · running · 12/600 req · ~1 h 20 min left · 0 challenges`."""
+    if not st:
+        return f"{cli} · no run yet"
+    done = sum(v for k, v in st["requests"].items() if k in ("list_pages", "ad_pages"))
+    planned = st.get("planned") or 0
+    state = st["status"]
+    age = (now or time.time()) - datetime.fromisoformat(st["updated_at"].replace("Z", "+00:00")).timestamp()
+    if state == "running" and age > STALE_S and not _alive(st.get("pid")):
+        state = f"stale ({int(age // 60)} min, process gone)"
+    parts = [
+        cli,
+        f"{st['command']} {st['stage']}",
+        state,
+        f"{done}/{planned} pages" if planned else f"{done} pages",
+    ]
+    if st["status"] == "running" and planned and st.get("per_minute"):
+        left = max(planned - done, 0) * 60 / st["per_minute"]
+        h, m = divmod(round(left / 60), 60)
+        parts.append(f"~{h} h {m} min left" if h else f"~{m} min left")
+    parts.append(f"{st['challenges']} challenge{'s' if st['challenges'] != 1 else ''}")
+    return " · ".join(parts)
+
+
+def statusline() -> int:
+    """Claude Code statusLine command: reads its JSON from stdin (unused), prints one line, never fails."""
+    try:
+        from . import pipeline
+
+        cli = pipeline.consumer().cli
+    except Exception:  # noqa: BLE001
+        print("scrape-harness · no pipeline.toml")
+        return 0
+    try:
+        print(with_incidents(line(read(), cli), open_incident_count(read_path().parent)))
+    except Exception:  # noqa: BLE001 - a broken status file must not break the session's status line
+        print(f"{cli} · status unreadable")
+    return 0
+
+
+def standalone(cli: str, state_env: str, state_dirname: str) -> int:
+    """The project launcher's entry (.claude/statusline.py): names baked in, no package imports."""
+    raw = os.environ.get(state_env)
+    root = (
+        Path(raw).expanduser()
+        if raw
+        else Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state") / state_dirname
+    )
+    try:
+        st = json.loads((root / "status.json").read_text())
+    except (OSError, ValueError):
+        st = None
+    try:
+        print(with_incidents(line(st, cli), open_incident_count(root)))
+    except Exception:  # noqa: BLE001 - never a failing status line
+        print(f"{cli} · status unreadable")
+    return 0

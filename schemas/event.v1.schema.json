@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "event.v1.schema.json",
+  "title": "event.v1",
+  "description": "One run-control event. Append-only JSONL. A `challenge` stops the run. Two challenges for the same SITE within one hour, across runs and A/B variants, write a site `cooldown` that every crawl command refuses to start before `until`. An operator's `cooldown_cleared` (appended, never a deletion) ends a site's cooldowns and resets its challenge count; ORDER in this append-only log decides what it covers.",
+  "type": "object",
+  "required": [
+    "schema",
+    "at",
+    "run_id",
+    "kind"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "event.v1"
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "started",
+        "resumed",
+        "completed",
+        "challenge",
+        "cooldown",
+        "robots_disallowed",
+        "failed_request",
+        "cooldown_cleared",
+        "gone",
+        "run_correction",
+        "superseded",
+        "unreachable",
+        "incomplete"
+      ]
+    },
+    "url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uri"
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A fixed detector code, e.g. http_429, captcha_iframe, login_redirect, consent_gate."
+    },
+    "until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "cooldown only: no crawl starts before this."
+    },
+    "site": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The source site; challenges and cooldowns are counted per site."
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "description": "challenge only: what the blocked response itself said (no extra request). Allowlisted headers only; never cookies or tokens.",
+      "properties": {
+        "status": {
+          "type": "integer"
+        },
+        "server": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "cf_ray": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "cf_mitigated": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 200
+        },
+        "excerpt": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "egress": {
+          "$ref": "run.v1.schema.json#/$defs/egress"
+        },
+        "final_path": {
+          "type": "string",
+          "description": "Where the page ended (path only) when a redirect took it elsewhere."
+        },
+        "hops": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Main-frame redirect hops of that navigation (browser only)."
+        },
+        "snapshot": {
+          "type": "string",
+          "pattern": "^STATE:stops/",
+          "description": "The whole stopped page, gzipped, in STATE (local only)."
+        }
+      }
+    },
+    "clears": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "at",
+        "until"
+      ],
+      "description": "cooldown_cleared only: which cooldown event this clears.",
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "until": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "correction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "recorded",
+        "reconciled",
+        "note",
+        "evidence"
+      ],
+      "description": "run_correction only: an append-only correction of one field of a run record, which is never rewritten.",
+      "properties": {
+        "field": {
+          "type": "string",
+          "description": "The run.v1 field corrected, e.g. requests."
+        },
+        "recorded": {
+          "type": "object",
+          "description": "What the run record says."
+        },
+        "reconciled": {
+          "type": "object",
+          "description": "What the audit reconstructed (ranges as *_min/*_max)."
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "DATA-relative paths the audit read."
+        },
+        "incident": {
+          "type": "string",
+          "pattern": "^INC-",
+          "description": "The incident this correction reclassifies (incidents reclassify)."
+        }
+      }
+    }
+  }
+}

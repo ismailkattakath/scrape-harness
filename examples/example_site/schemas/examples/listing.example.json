@@ -1,0 +1,49 @@
+{
+  "schema": "listing.v1",
+  "ad_id": "1000001",
+  "fetched_at": "2026-01-15T12:00:00Z",
+  "fetch_reason": "new",
+  "raw_ref": {
+    "path": "raw/example.invalid/1000001/2026-01-15T12_00_00Z.html.gz",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "bytes": 1024
+  },
+  "source": {
+    "site": "example.invalid",
+    "url": "https://www.example.invalid/listings/widgets/sample-region/blue-widget-1000001",
+    "category": "listings",
+    "subcategory": "widgets",
+    "region": "sample-region"
+  },
+  "content": {
+    "title": "Blue widget",
+    "description": "A synthetic blue widget.",
+    "contact": {
+      "website": null
+    },
+    "media_urls": [
+      "https://img.example.invalid/widget-1.jpg"
+    ]
+  },
+  "time": {
+    "first_published": "2026-01-01T09:00:00Z",
+    "bumped_at": "2026-01-15T11:30:00Z"
+  },
+  "location": {
+    "city_label": "Sampletown",
+    "pin": {
+      "lat": 10.5,
+      "lon": -29.5,
+      "approximate": true
+    }
+  },
+  "site": {
+    "example": {
+      "facts": {
+        "colour": "Blue",
+        "condition": "New"
+      },
+      "page_schema_type": "Product"
+    }
+  }
+}

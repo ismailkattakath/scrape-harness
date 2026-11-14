@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Edit(**/*.jsonl)",
+      "Edit(**/*.ndjson)",
+      "Edit(**/*.csv)",
+      "Edit(**/*.tsv)",
+      "Edit(**/*.parquet)",
+      "Edit(**/*.sqlite)",
+      "Edit(**/*.db)",
+      "Edit(./data/**)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./.envrc.local)",
+      "Bash(curl *example.invalid*)",
+      "Bash(wget *example.invalid*)",
+      "Bash(printenv EX_API_KEY)",
+      "Bash(git add -f *)",
+      "Bash(git add --force *)"
+    ]
+  },
+  "env": {
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1"
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/statusline.py\"",
+    "refreshInterval": 5
+  },
+  "extraKnownMarketplaces": {
+    "kattakath": {
+      "source": {
+        "source": "github",
+        "repo": "kattakath/skills"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "scrape-harness@kattakath": true
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "schema": "event.v1",
+  "at": "2026-01-15T12:00:00Z",
+  "run_id": "2026-01-15T11:55:00Z-crawl-lists",
+  "kind": "challenge",
+  "url": "https://www.example.invalid/listings/widgets/sample-region?page=3",
+  "reason": "http_403",
+  "until": null,
+  "site": "example.invalid",
+  "evidence": {
+    "status": 403,
+    "server": "cloudflare",
+    "cf_ray": "0123456789abcdef-YYZ",
+    "cf_mitigated": "challenge",
+    "title": "Just a moment...",
+    "excerpt": "Synthetic excerpt: Verifying you are human.",
+    "egress": {
+      "loc": "CA",
+      "colo": "YYZ",
+      "warp": "off",
+      "gateway": "off",
+      "checked_at": "2026-01-15T11:54:59Z",
+      "trace_url": "https://www.cloudflare.com/cdn-cgi/trace"
+    }
+  }
+}

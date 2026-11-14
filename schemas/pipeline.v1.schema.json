@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pipeline.v1.schema.json",
+  "title": "pipeline.v1",
+  "description": "pipeline.toml, the ONE declaration of a consumer's stages, what each reads and writes, its network class, and the typed data files. The run card, the store and the Bash hook all derive from it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "name", "consumer", "stages", "utilities", "groups", "plan_outputs", "files", "offline_flags"],
+  "properties": {
+    "schema": { "const": "pipeline.v1" },
+    "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "consumer": {
+      "description": "The consumer's world-visible names. The harness hard-codes none of them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cli", "env_prefix", "data_env", "state_env", "state_dirname", "default_site", "default_region", "approval_key_fingerprint", "secret_envs", "site_hosts"],
+      "properties": {
+        "cli": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "env_prefix": { "description": "Knobs are <env_prefix>_<KNOB>.", "type": "string", "pattern": "^[A-Z][A-Z0-9]*$" },
+        "data_env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+        "state_env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+        "state_dirname": { "description": "Default state root: $XDG_STATE_HOME/<this>.", "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+        "default_site": { "type": "string", "minLength": 1 },
+        "default_region": { "type": "string", "minLength": 1 },
+        "approval_key_fingerprint": { "description": "SHA256 fingerprint of the approval signing key (ssh-keygen -l); must match the allowed_signers file.", "type": "string", "pattern": "^SHA256:[A-Za-z0-9+/]{43}$" },
+        "secret_envs": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" } },
+        "site_hosts": { "description": "Host substrings a direct HTTP client must never reach.", "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9.-]+$" } },
+        "site_overlay": { "description": "true: the site specifics (default_site, default_region, site_hosts, [plugins] sources, python_path and schema_dirs (paths resolved against the site file's folder and added to the repo's), [crawl] proxy and refresh) come from a site file outside the repo, $<env_prefix>_SITE_CONFIG else $<data_env>/config/site.toml, under [pipeline.*]; unreadable = refuse (pipeline.py OVERLAY_ALLOWED).", "type": "boolean" }
+      }
+    },
+    "stages": {
+      "description": "Ordered: a stage's position is its 'Stage N/M' on the run card.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/command" }
+    },
+    "utilities": {
+      "description": "Commands outside the stage order (card shows 'utility').",
+      "type": "array",
+      "items": { "$ref": "#/$defs/command" }
+    },
+    "plugins": {
+      "description": "The consumer's own code and schemas, paths relative to pipeline.toml.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z_]*$" },
+      "properties": {
+        "python_path": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "schema_dirs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "commands": {
+          "description": "'module:function' entries; each function(subparsers) adds the consumer's own subcommands.",
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[A-Za-z_][\\w.]*:[A-Za-z_]\\w*$" }
+        }
+      },
+      "additionalProperties": {
+        "description": "A plug-in group (sources, drivers, extractors, geocoders, ...): name -> 'module:Class'.",
+        "type": "object",
+        "additionalProperties": { "type": "string", "pattern": "^[A-Za-z_][\\w.]*:[A-Za-z_]\\w*$" }
+      }
+    },
+    "claude": {
+      "description": "The consumer's own Claude Code permission rules, merged into the generated .claude/settings.json.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allow": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z][A-Za-z]*(\\(.+\\))?$" } }
+      }
+    },
+    "crawl": {
+      "description": "Browser crawl settings.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "block_extensions": {
+          "description": "File extensions the browser never fetches (images, fonts, media). Each becomes an anchored CDP URLPattern *://*:*/*.<ext>, matched on the PATH's end, so a page, a CSS or a JS file is never hit by a substring. [] blocks nothing. Absent: the operator-approved images, fonts and media (browser.BLOCK_DEFAULT).",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]{1,8}$",
+            "not": { "enum": ["css", "js", "mjs", "cjs", "html", "htm", "xhtml", "php", "asp", "aspx", "jsp", "json", "xml", "txt"] }
+          }
+        },
+        "image_mode": {
+          "description": "How the browser keeps the image extensions of block_extensions off the network: answer (default) serves a local placeholder SVG, so a page sees a loaded image (no onerror retries, no collapsed layout); block refuses them (onerror fires). Fonts and media are blocked either way.",
+          "enum": ["answer", "block"]
+        },
+        "image_placeholder": {
+          "description": "The answer placeholder's [width, height] in px (default [300, 200]).",
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1, "maximum": 4000 },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "proxy": {
+          "description": "The run's proxy: ONE per run, for the browser, the HTTP client and the egress preflight. HTTP only (Chromium refuses authenticated SOCKS5). `url`, or `urls` with a `choice` that a new run's --plan uses to pick one (random | round_robin); the plan signs the chosen URL, and a resumed run keeps its own. Credentials are Keychain item NAMES, read through the secret CLI's exec path at launch.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["user_secret", "password_secret"],
+          "oneOf": [{ "required": ["url"] }, { "required": ["urls"] }],
+          "properties": {
+            "url": { "type": "string", "pattern": "^http://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*:[0-9]{2,5}$" },
+            "urls": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^http://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*:[0-9]{2,5}$" } },
+            "choice": { "enum": ["random", "round_robin"] },
+            "user_secret": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9:._@-]*$" },
+            "password_secret": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9:._@-]*$" }
+          }
+        },
+        "refresh": {
+          "description": "`<cli> refresh`: the ONE on-demand chain, run by doit in this order under ONE single-use bounded Touch ID approval. Nested under [crawl], not a top-level [refresh], so a pinned plugin that knows pipeline.v1's top-level keys keeps working. Step names are existing commands (stages or utilities), each once except crawl-lists (one step per list set, e.g. per subcategory; each set is signed and crawled once); a site step must be crawl-lists or fetch-ads (the steps that take --refresh-run); a paid step declares paid_gate or paid_exempt (checked on load).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["steps"],
+          "properties": { "steps": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/refresh_step" } } }
+        }
+      }
+    },
+    "groups": {
+      "description": "Named entry lists, referenced from inputs/outputs as '@name'.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "additionalProperties": { "type": "array", "items": { "$ref": "#/$defs/entry" } }
+    },
+    "plan_outputs": {
+      "description": "What every --plan invocation writes instead of the command's outputs.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    },
+    "files": {
+      "description": "Typed JSONL files under DATA: kind -> path + record schema.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "schema"],
+        "properties": {
+          "path": { "type": "string", "pattern": "^[^/{}][^{}]*\\.jsonl$" },
+          "schema": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*\\.v[0-9]+$" }
+        }
+      }
+    },
+    "offline_flags": {
+      "description": "Flags that make a network-class command offline (the hook allows it). A space matches ' ' or '='.",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^--[a-z][a-z0-9-]*( [a-z0-9-]+)?$" }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "description": "'ROOT:template' (ROOT is DATA, STATE, OLD or stdout; {name} is filled from the run's real context), or '@group'.",
+      "type": "string",
+      "pattern": "^(@[a-z][a-z0-9_]*|(DATA|STATE|OLD|stdout):.+)$"
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "network", "inputs", "outputs"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*( [a-z][a-z0-9-]*)?$" },
+        "network": {
+          "description": "none: offline. site: requests to the crawled site. paid: a metered API. The hook blocks site/paid unless an offline flag is present.",
+          "enum": ["none", "site", "paid"]
+        },
+        "args": {
+          "description": "Arguments the task runner (`<cli> run`) passes to this stage, e.g. its subcategory.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "operator_only": {
+          "description": "Only the operator runs it (the hook asks, never allows silently).",
+          "type": "boolean"
+        },
+        "inputs": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+        "outputs": { "type": "array", "items": { "$ref": "#/$defs/entry" } }
+      }
+    },
+    "refresh_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "not": { "required": ["paid_gate", "paid_exempt"] },
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*( [a-z][a-z0-9-]*)?$" },
+        "args": {
+          "description": "The step's own arguments. Never --approve-network, --refresh-run, --plan or --dry-run: the runner adds what a step needs.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "paid_gate": {
+          "description": "A paid step first runs its own --dry-run, reads count_field from its JSON stdout, and stops (exit 3, resumable) unless the count is 0 or the operator passed `<cli> refresh --<step>-count N` equal to it; it then runs with --max-requests N when the step has that option.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["count_field"],
+          "properties": { "count_field": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" } }
+        },
+        "paid_exempt": {
+          "description": "Why this paid step needs no count gate, in the consumer's own words next to the step.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

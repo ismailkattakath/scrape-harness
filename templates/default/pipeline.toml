@@ -1,0 +1,115 @@
+# pipeline.toml (scrape-harness pipeline.v1): the ONE declaration of this project's stages, I/O, network
+# classes, data files, world-visible names and plug-ins. It is a TEMPLATE until every FILL-ME is
+# replaced: the CLI and the plugin's hooks refuse to run on it and name what is left to fill.
+#
+# After filling:  nix develop -c <cli> claude-settings --write   (renders .claude/settings.json + the
+# status line; commit both), then `nix flake check`, then push with `nix run .#ship`.
+schema = "pipeline.v1"
+name = "my-pipeline"
+
+offline_flags = ["--dry-run", "--driver fixture"]
+plan_outputs = ["STATE:plans/{plan_hash}.json"]
+
+[consumer]
+cli = "FILL-ME"                       # the CLI name: lowercase, and NOT a system command (`ex` is vi)
+env_prefix = "FILL-ME"                # knobs are <PREFIX>_<KNOB>, e.g. MY_NETWORK_APPROVED (uppercase)
+data_env = "FILL-ME"                  # env var naming the DATA root (synced folder, outside any repo)
+state_env = "FILL-ME"                 # env var naming the STATE root (local only, never synced)
+state_dirname = "FILL-ME"             # default STATE root: $XDG_STATE_HOME/<this>
+default_site = "FILL-ME"              # the site your source is registered under (e.g. example.invalid)
+default_region = "FILL-ME"            # the region its list URLs use
+approval_key_fingerprint = "FILL-ME"  # `ssh-keygen -lf` of the operator's Touch ID approval key (SHA256:...)
+secret_envs = []                      # env vars only the CLI may read (the hook blocks expanding them)
+site_hosts = ["FILL-ME"]              # hosts direct HTTP must never reach (pages go through the CLI only)
+
+[plugins]
+schema_dirs = ["schemas"]
+
+[plugins.sources]
+FILL-ME = "site_source.source:Site"   # key = default_site
+
+[groups]
+run = [
+  "DATA:runs/{run_file}.json",
+  "DATA:runs/{run_file}.log.jsonl",
+  "DATA:events.jsonl",
+  "STATE:crawlee/request_queues/{queue}",
+]
+
+[[stages]]
+name = "crawl-lists"
+network = "site"
+inputs = []
+outputs = ["DATA:observations.jsonl", "@run"]
+
+[[stages]]
+name = "fetch-ads"
+network = "site"
+inputs = ["DATA:observations.jsonl", "DATA:listings.jsonl"]
+outputs = ["DATA:listings.jsonl", "DATA:raw/{site}/ ({ads} ad snapshots)", "DATA:derived/samples/{sample_file}.jsonl", "@run"]
+
+[[stages]]
+name = "reparse"
+network = "none"
+inputs = ["DATA:listings.jsonl", "DATA:raw/"]
+outputs = ["DATA:listings.jsonl"]
+
+[[utilities]]
+name = "ab"
+network = "site"
+inputs = []
+outputs = ["DATA:derived/ab-{ab_at}.json", "@run"]
+
+[[utilities]]
+name = "probe robots"
+network = "site"  # ONE robots.txt GET after the egress preflight; gated like any site run
+inputs = []
+outputs = ["@run"]
+
+[[utilities]]
+name = "crawl resume"
+network = "site"
+inputs = ["STATE:crawlee/request_queues/{queue}", "DATA:runs/{run_file}.json"]
+outputs = ["DATA:observations.jsonl, listings.jsonl", "@run"]
+
+[[utilities]]
+name = "migrate"
+network = "none"
+inputs = ["OLD:every file"]
+outputs = ["DATA:data files", "STATE:state files"]
+
+[[utilities]]
+name = "cooldown"
+network = "none"
+inputs = ["DATA:events.jsonl"]
+outputs = ["DATA:events.jsonl"]
+
+[[utilities]]
+name = "approve"
+network = "none"
+operator_only = true
+inputs = []
+outputs = []
+
+[[utilities]]
+name = "browser open"
+network = "site"
+operator_only = true
+inputs = []
+outputs = []
+
+[files.observations]
+path = "observations.jsonl"
+schema = "observation.v1"
+
+[files.listings]
+path = "listings.jsonl"
+schema = "listing.v1"
+
+[files.findings]
+path = "findings.jsonl"
+schema = "finding.v1"
+
+[files.events]
+path = "events.jsonl"
+schema = "event.v1"

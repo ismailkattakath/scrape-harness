@@ -1,0 +1,13 @@
+{
+  "schema": "sample.v1",
+  "run_id": "2026-01-15T12:00:00Z-fetch-ads-desktop-abc123",
+  "site": "example.invalid",
+  "ad_id": "1000001",
+  "url": "https://www.example.invalid/listings/widgets/sample-region/blue-widget-1000001",
+  "reason": "new",
+  "subcategory": "widgets",
+  "decile": 0,
+  "weight": 3.5,
+  "seed": 7,
+  "allocation": "equal"
+}

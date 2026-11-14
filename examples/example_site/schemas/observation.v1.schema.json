@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "observation.v1.schema.json",
+  "title": "observation.v1",
+  "description": "One SIGHTING of one ad on a list page of the EXAMPLE site. Append-only JSONL. Core floor (what the harness reads): schema, ad_id, site, seen_at, ad_url, list{url,page,page_count,position,sponsored,subcategory}, card, card_hash, bumped_at.",
+  "type": "object",
+  "required": [
+    "schema",
+    "ad_id",
+    "site",
+    "seen_at",
+    "ad_url",
+    "list"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "observation.v1"
+    },
+    "ad_id": {
+      "type": "string"
+    },
+    "site": {
+      "type": "string",
+      "examples": [
+        "example.invalid"
+      ]
+    },
+    "seen_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ad_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "The card's link to the ad page; what fetch-ads GETs. Added in the repo's first version because a sighting without it cannot drive a fetch."
+    },
+    "crawl_id": {
+      "type": "string",
+      "description": "Groups sightings from one crawl run (e.g. 2026-11-08T14:00Z/fe+ts/stratified-15)."
+    },
+    "list": {
+      "type": "object",
+      "required": [
+        "url",
+        "page",
+        "position"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "subcategory": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "page_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Total pages at crawl time, so depth = page/page_count."
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sponsored": {
+          "type": "boolean"
+        },
+        "sample_weight": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Inverse sampling fraction of this page's stratum (e.g. 530/36), for population estimates."
+        }
+      }
+    },
+    "card": {
+      "type": "object",
+      "description": "Volatile facts as the card shows them now. Site-specific names live under the site key.",
+      "properties": {
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "city_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "example": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "price",
+            "featured"
+          ],
+          "description": "The example site's own card facts.",
+          "properties": {
+            "price": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "featured": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "bumped_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "When the list page shows one (some designs do not; then null)."
+    },
+    "card_hash": {
+      "type": "string",
+      "description": "Hash of the card facts; a change from the last sighting triggers a listing refetch (fetch_reason card_changed)."
+    }
+  }
+}

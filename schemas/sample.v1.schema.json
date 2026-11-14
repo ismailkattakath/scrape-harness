@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sample.v1.schema.json",
+  "title": "sample.v1",
+  "description": "One sampled ad of a depth-stratified fetch-ads run: its stratum and design weight N_h/n_h. One JSONL file per run under DATA/derived/samples/<run_id>.jsonl.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "run_id",
+    "site",
+    "ad_id",
+    "url",
+    "reason",
+    "subcategory",
+    "decile",
+    "weight",
+    "seed",
+    "allocation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "sample.v1"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "site": {
+      "type": "string"
+    },
+    "ad_id": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "reason": {
+      "enum": [
+        "new",
+        "card_changed",
+        "stale_7d",
+        "recruit"
+      ]
+    },
+    "subcategory": {
+      "type": "string"
+    },
+    "decile": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 9
+    },
+    "weight": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "seed": {
+      "type": "integer"
+    },
+    "allocation": {
+      "enum": [
+        "equal",
+        "proportional"
+      ]
+    }
+  }
+}

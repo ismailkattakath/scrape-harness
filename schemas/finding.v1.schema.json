@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "finding.v1.schema.json",
+  "title": "finding.v1",
+  "description": "One hypothesis in the findings register. Append-only JSONL: a re-test appends a new line with the same id; the latest `tested_at` is current, earlier lines are its history.",
+  "type": "object",
+  "required": ["schema", "id", "question", "status", "method", "data", "result", "weakest_assumption", "tested_at"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "finding.v1" },
+    "id": { "type": "string", "pattern": "^H[0-9]+$" },
+    "question": { "type": "string" },
+    "status": { "enum": ["open", "supported", "refuted", "inconclusive"] },
+    "method": { "type": "string", "description": "How it was tested, reproducibly (scripts, thresholds, controls)." },
+    "data": {
+      "type": "object",
+      "required": ["scope", "n"],
+      "additionalProperties": false,
+      "properties": {
+        "scope": { "type": "string", "description": "Site, region, subcategories, dates, sampling design." },
+        "n": { "type": "integer", "minimum": 0 },
+        "snapshot": { "type": ["string", "null"], "description": "Which data files/version were used." }
+      }
+    },
+    "result": { "type": "string" },
+    "evidence": { "type": "array", "items": { "type": "string" }, "description": "Key numbers, each with how it was measured." },
+    "weakest_assumption": { "type": "string" },
+    "next_test": { "type": ["string", "null"] },
+    "tested_at": { "type": "string", "format": "date-time" }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "status.v1.schema.json",
+  "title": "status.v1",
+  "description": "STATE/status.json: the live status of the latest run (overwritten atomically; a mirror of the run record for the statusline and the monitor, never data).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "run_id", "command", "stage", "status", "created_at", "updated_at", "pid", "requests", "planned", "per_minute", "challenges", "log"],
+  "properties": {
+    "schema": { "const": "status.v1" },
+    "run_id": { "type": "string" },
+    "command": { "type": "string" },
+    "stage": { "type": "string", "pattern": "^([0-9]+/[0-9]+|utility)$" },
+    "status": { "enum": ["running", "stopped", "aborted", "completed"] },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "pid": { "type": "integer", "minimum": 1 },
+    "requests": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+    "planned": { "type": "integer", "minimum": 0 },
+    "per_minute": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+    "challenges": { "type": "integer", "minimum": 0 },
+    "log": { "type": ["string", "null"], "description": "Absolute path of the run's live log." }
+  }
+}

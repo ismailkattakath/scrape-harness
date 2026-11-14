@@ -1,0 +1,260 @@
+{
+ "files": {
+  "events": [
+   "events.jsonl",
+   "event.v1"
+  ],
+  "findings": [
+   "findings.jsonl",
+   "finding.v1"
+  ],
+  "listings": [
+   "listings.jsonl",
+   "listing.v1"
+  ],
+  "observations": [
+   "observations.jsonl",
+   "observation.v1"
+  ]
+ },
+ "hook": {
+  "EX_NETWORK_APPROVED=1 examplesite fetch-ads": "ask",
+  "curl -s https://www.example.invalid/": "block",
+  "echo $EX_API_KEY": "block",
+  "examplesite ab --subcategory x": "block",
+  "examplesite approve aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "allow",
+  "examplesite browser open": "ask",
+  "examplesite cooldown clear --site s --reason r": "ask",
+  "examplesite cooldown status": "allow",
+  "examplesite crawl resume": "block",
+  "examplesite crawl-lists --driver fixture --subcategory x": "allow",
+  "examplesite crawl-lists --subcategory x": "block",
+  "examplesite fetch-ads": "block",
+  "examplesite fetch-ads --approve-network": "ask",
+  "examplesite fetch-ads --dry-run": "allow",
+  "examplesite plan crawl-lists --subcategory x --seed 1": "allow",
+  "examplesite reparse": "allow",
+  "nix flake check": "allow",
+  "nix run .#default -- fetch-ads": "block"
+ },
+ "runcard": {
+  "ab|dry-run": {
+   "inputs": [],
+   "outputs": [],
+   "stage": "utility"
+  },
+  "ab|plan": {
+   "inputs": [],
+   "outputs": [
+    "STATE:plans/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"
+   ],
+   "stage": "utility"
+  },
+  "ab|run": {
+   "inputs": [],
+   "outputs": [
+    "DATA:derived/ab-2026-01-15T12_00_00Z.json",
+    "DATA:runs/2026-01-15T12_00_00Z-x-desktop-abc123.json",
+    "DATA:runs/2026-01-15T12_00_00Z-x-desktop-abc123.log.jsonl",
+    "DATA:events.jsonl",
+    "STATE:crawlee/request_queues/2026-01-15t12-00-00z-x-desktop-abc123"
+   ],
+   "stage": "utility"
+  },
+  "cooldown|dry-run": {
+   "inputs": [
+    "DATA:events.jsonl"
+   ],
+   "outputs": [],
+   "stage": "utility"
+  },
+  "cooldown|plan": {
+   "inputs": [
+    "DATA:events.jsonl"
+   ],
+   "outputs": [
+    "STATE:plans/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"
+   ],
+   "stage": "utility"
+  },
+  "cooldown|run": {
+   "inputs": [
+    "DATA:events.jsonl"
+   ],
+   "outputs": [
+    "DATA:events.jsonl"
+   ],
+   "stage": "utility"
+  },
+  "crawl resume|dry-run": {
+   "inputs": [
+    "STATE:crawlee/request_queues/2026-01-15t12-00-00z-x-desktop-abc123",
+    "DATA:runs/2026-01-15T12_00_00Z-x-desktop-abc123.json"
+   ],
+   "outputs": [],
+   "stage": "utility"
+  },
+  "crawl resume|plan": {
+   "inputs": [
+    "STATE:crawlee/request_queues/2026-01-15t12-00-00z-x-desktop-abc123",
+    "DATA:runs/2026-01-15T12_00_00Z-x-desktop-abc123.json"
+   ],
+   "outputs": [
+    "STATE:plans/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"
+   ],
+   "stage": "utility"
+  },
+  "crawl resume|run": {
+   "inputs": [
+    "STATE:crawlee/request_queues/2026-01-15t12-00-00z-x-desktop-abc123",
+    "DATA:runs/2026-01-15T12_00_00Z-x-desktop-abc123.json"
+   ],
+   "outputs": [
+    "DATA:observations.jsonl, listings.jsonl",
+    "DATA:runs/2026-01-15T12_00_00Z-x-desktop-abc123.json",
+    "DATA:runs/2026-01-15T12_00_00Z-x-desktop-abc123.log.jsonl",
+    "DATA:events.jsonl",
+    "STATE:crawlee/request_queues/2026-01-15t12-00-00z-x-desktop-abc123"
+   ],
+   "stage": "utility"
+  },
+  "crawl-lists|dry-run": {
+   "inputs": [],
+   "outputs": [],
+   "stage": "1/3"
+  },
+  "crawl-lists|plan": {
+   "inputs": [],
+   "outputs": [
+    "STATE:plans/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"
+   ],
+   "stage": "1/3"
+  },
+  "crawl-lists|run": {
+   "inputs": [],
+   "outputs": [
+    "DATA:observations.jsonl",
+    "DATA:runs/2026-01-15T12_00_00Z-x-desktop-abc123.json",
+    "DATA:runs/2026-01-15T12_00_00Z-x-desktop-abc123.log.jsonl",
+    "DATA:events.jsonl",
+    "STATE:crawlee/request_queues/2026-01-15t12-00-00z-x-desktop-abc123"
+   ],
+   "stage": "1/3"
+  },
+  "fetch-ads|dry-run": {
+   "inputs": [
+    "DATA:observations.jsonl",
+    "DATA:listings.jsonl"
+   ],
+   "outputs": [],
+   "stage": "2/3"
+  },
+  "fetch-ads|plan": {
+   "inputs": [
+    "DATA:observations.jsonl",
+    "DATA:listings.jsonl"
+   ],
+   "outputs": [
+    "STATE:plans/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"
+   ],
+   "stage": "2/3"
+  },
+  "fetch-ads|run": {
+   "inputs": [
+    "DATA:observations.jsonl",
+    "DATA:listings.jsonl"
+   ],
+   "outputs": [
+    "DATA:listings.jsonl",
+    "DATA:raw/example.invalid/ (3 ad snapshots)",
+    "DATA:derived/samples/2026-01-15T12_00_00Z-x-desktop-abc123.jsonl",
+    "DATA:runs/2026-01-15T12_00_00Z-x-desktop-abc123.json",
+    "DATA:runs/2026-01-15T12_00_00Z-x-desktop-abc123.log.jsonl",
+    "DATA:events.jsonl",
+    "STATE:crawlee/request_queues/2026-01-15t12-00-00z-x-desktop-abc123"
+   ],
+   "stage": "2/3"
+  },
+  "migrate|dry-run": {
+   "inputs": [
+    "OLD:every file"
+   ],
+   "outputs": [],
+   "stage": "utility"
+  },
+  "migrate|plan": {
+   "inputs": [
+    "OLD:every file"
+   ],
+   "outputs": [
+    "STATE:plans/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"
+   ],
+   "stage": "utility"
+  },
+  "migrate|run": {
+   "inputs": [
+    "OLD:every file"
+   ],
+   "outputs": [
+    "DATA:data files",
+    "STATE:state files"
+   ],
+   "stage": "utility"
+  },
+  "probe robots|dry-run": {
+   "inputs": [],
+   "outputs": [],
+   "stage": "utility"
+  },
+  "probe robots|plan": {
+   "inputs": [],
+   "outputs": [
+    "STATE:plans/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"
+   ],
+   "stage": "utility"
+  },
+  "probe robots|run": {
+   "inputs": [],
+   "outputs": [
+    "DATA:runs/2026-01-15T12_00_00Z-x-desktop-abc123.json",
+    "DATA:runs/2026-01-15T12_00_00Z-x-desktop-abc123.log.jsonl",
+    "DATA:events.jsonl",
+    "STATE:crawlee/request_queues/2026-01-15t12-00-00z-x-desktop-abc123"
+   ],
+   "stage": "utility"
+  },
+  "reparse|dry-run": {
+   "inputs": [
+    "DATA:listings.jsonl",
+    "DATA:raw/"
+   ],
+   "outputs": [],
+   "stage": "3/3"
+  },
+  "reparse|plan": {
+   "inputs": [
+    "DATA:listings.jsonl",
+    "DATA:raw/"
+   ],
+   "outputs": [
+    "STATE:plans/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"
+   ],
+   "stage": "3/3"
+  },
+  "reparse|run": {
+   "inputs": [
+    "DATA:listings.jsonl",
+    "DATA:raw/"
+   ],
+   "outputs": [
+    "DATA:listings.jsonl"
+   ],
+   "stage": "3/3"
+  }
+ },
+ "stages": [
+  "crawl-lists",
+  "fetch-ads",
+  "reparse"
+ ]
+}

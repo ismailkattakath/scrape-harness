@@ -1,0 +1,18 @@
+{
+ "digest": "90e1329c813db7abe129eea0898d37adb2be9add178ddfa0aafe407326e71d8b",
+ "files": {
+  "derived/ab-TIME.json": "7a7ce35c5f16250ddc66971895c0559368538f8e3f12b29259e060c748f1f69e",
+  "events.jsonl": "e393ace27573160da0b8857573c2f881feea280c027e5581277ad349acf1c678",
+  "listings.jsonl": "3dc90037796fb8595f52b89c20cf8b3e18a8e8739956bf7b48b9f2e7427d9f4b",
+  "observations.jsonl": "6a1f39e0d9512d234a8112b45486a61dd612b206533b6f07853a55a764214f82",
+  "raw/example.invalid/1000001/TIME.html.gz": "39e6c7618092119b7c638874a9000fe2e90f80222ab13475ac165dcd363f3512",
+  "raw/example.invalid/1000002/TIME.html.gz": "f7c63fbd54509452cb8cff59eb2f4f89df0060c7c3860c815e63de3326ce2a1b",
+  "raw/example.invalid/1000003/TIME.html.gz": "58c5a0f1111ab93a738d0507a05cdd327dbd109d1a9098ff2a15ca58a43d04c2",
+  "runs/RUN1.json": "88e751b8e69893bab78ce986d12d3e9a857a3e55fedd16586298ed425b62126c",
+  "runs/RUN1.log.jsonl": "2696225e79531501f0cc2b13697ac69c874633fbe66c0a515f9f4850479db319",
+  "runs/RUN2.json": "2bb508f038ebbe001b87433245d0c4193da4f82ec1928e66b36f0b42cacad03d",
+  "runs/RUN2.log.jsonl": "ba8c38f6416832ad42089a8740a4aea617c10b21ebe4f351850572b94df0d900",
+  "runs/RUN3.json": "0fdcbad0ee019c4bc438032c7122bd101e7f8beb122c740044f30b41d3c8f5e5",
+  "runs/RUN3.log.jsonl": "a8c5d568cc80eb1309d06bf0b1245958a94ba818f6d39d9af1750fba8289cc89"
+ }
+}

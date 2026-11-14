@@ -1,0 +1,13 @@
+{
+  "schema": "finding.v1",
+  "id": "H0",
+  "question": "Synthetic example: is the site pin closer to the written address than to the filed city centre?",
+  "status": "probably",
+  "method": "Synthetic example record; no measurement behind it.",
+  "data": { "scope": "synthetic", "n": 0, "snapshot": null },
+  "result": "Not tested; this record only demonstrates the contract.",
+  "evidence": [],
+  "weakest_assumption": "None; nothing was measured.",
+  "next_test": null,
+  "tested_at": "2026-01-15T12:00:00Z"
+}

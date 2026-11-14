@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ab.v1.schema.json",
+  "title": "ab.v1",
+  "description": "Field coverage of the SAME list pages fetched in each page variant (no ad pages), so the operator can choose a default variant.",
+  "type": "object",
+  "required": [
+    "schema",
+    "at",
+    "site",
+    "subcategory",
+    "pages",
+    "variants"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "ab.v1"
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "site": {
+      "type": "string"
+    },
+    "subcategory": {
+      "type": "string"
+    },
+    "pages": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "variants": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "cards",
+          "coverage",
+          "pins_on_pages",
+          "stopped"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "cards": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "coverage": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "description": "Share of cards with the field present (verified/available: share true)."
+          },
+          "pins_on_pages": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "schema.org GeoCoordinates found on the list pages (extruct)."
+          },
+          "stopped": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Challenge reason if this variant was stopped, else null."
+          },
+          "requests": {
+            "$ref": "run.v1.schema.json#/$defs/requests"
+          }
+        }
+      }
+    }
+  }
+}

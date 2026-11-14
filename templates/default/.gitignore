@@ -1,0 +1,7 @@
+# NO DATA IN THIS REPO: DATA and STATE live outside it ([consumer].data_env / state_env).
+/result
+/result-*
+/.direnv/
+.envrc.local
+__pycache__/
+*.jsonl

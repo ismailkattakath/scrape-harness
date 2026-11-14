@@ -1,0 +1,26 @@
+{
+  "schema": "run.v1",
+  "run_id": "2026-01-15T11:55:00Z-crawl-lists",
+  "command": "crawl-lists",
+  "variant": "desktop",
+  "created_at": "2026-01-15T11:55:00Z",
+  "status": "stopped",
+  "challenges": 1,
+  "source": "example.invalid",
+  "queue": "2026-01-15t11-55-00z-crawl-lists-desktop",
+  "egress": {
+    "loc": "CA",
+    "colo": "YYZ",
+    "warp": "off",
+    "gateway": "off",
+    "checked_at": "2026-01-15T11:54:59Z",
+    "trace_url": "https://www.cloudflare.com/cdn-cgi/trace"
+  },
+  "requests": {
+    "list_pages": 1,
+    "ad_pages": 0,
+    "robots": 1,
+    "other": 0,
+    "egress_trace": 1
+  }
+}

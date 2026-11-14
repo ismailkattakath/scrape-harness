@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "refresh.v1.schema.json",
+  "title": "refresh.v1",
+  "description": "The state of ONE `<cli> refresh` run (the STATE root ($<state_env>)/refresh/<run_id>.json, rewritten atomically): which bounded approval it uses, and how far its steps got. A rerun continues the latest running/failed one, skipping its done steps. Its approval is spent when it completes or stops for good (status complete / spent).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "run_id", "plan_hash", "approval_id", "created_at", "updated_at", "status", "steps"],
+  "properties": {
+    "schema": { "const": "refresh.v1" },
+    "run_id": { "type": "string", "pattern": "^refresh-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}$" },
+    "plan_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "sha256 of the signed bounds (the bounded approval's plan_hash)." },
+    "approval_id": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "status": {
+      "enum": ["running", "failed", "complete", "spent"],
+      "description": "running: steps are executing. failed: a step failed and the run is resumable (same run id, same approval, inside its TTL; a site step's resume counts its ceiling again, so it fits only if the bounds leave that headroom). complete: every step done, the approval spent. spent: stopped for good (a bound breach, a challenge or cooldown stop, the approval expired or revoked, or --abandon)."
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "description": "In declared order.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "status"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[1-9][0-9]*:.+$", "description": "position:name, e.g. 2:crawl-lists (crawl-lists may repeat); the step's identity for resume and done-tracking." },
+          "name": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["pending", "running", "done", "failed"] },
+          "exit": { "type": "integer" },
+          "duration_s": { "type": "number", "minimum": 0 },
+          "summary": { "type": ["object", "null"], "description": "The last JSON object the step printed on stdout." },
+          "reason": { "type": "string", "description": "Why it failed (a paid gate's stop names the count and the flag)." },
+          "paid_count": { "type": "integer", "minimum": 0, "description": "A paid-gated step: the count its --dry-run reported." }
+        }
+      }
+    },
+    "headroom": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["list_pages", "ad_requests"],
+      "description": "The bounded approval's headroom over this run's `used` lines (net of refunds).",
+      "properties": {
+        "list_pages": { "$ref": "#/$defs/used_max" },
+        "ad_requests": { "$ref": "#/$defs/used_max" }
+      }
+    },
+    "spent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["at", "why"],
+      "properties": { "at": { "type": "string", "format": "date-time" }, "why": { "type": "string", "minLength": 1 } }
+    }
+  },
+  "$defs": {
+    "used_max": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["used", "max"],
+      "properties": { "used": { "type": "integer", "minimum": 0 }, "max": { "type": "integer", "minimum": 0 } }
+    }
+  }
+}

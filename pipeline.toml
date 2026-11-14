@@ -1,0 +1,156 @@
+# pipeline.v1 (schemas/pipeline.v1.schema.json): the ONE declaration of stages, I/O, network class,
+# typed data files and the consumer's world-visible names. The run card (Stage N/M, Inputs, Outputs),
+# the store's file table, the CLI's env names and the Bash hook's rules are all derived from it.
+#
+# This is the EXAMPLE consumer's pipeline (examples/example_site: a synthetic site on the reserved
+# example.invalid domain), so the harness's own tests and hooks run against a complete layout. A real
+# consumer ships its own file at its project root (or points SCRAPE_HARNESS_PIPELINE at it). Paths are
+# templates only, never data. Entries are "ROOT:template" or "@group"; {name} is filled from the run's
+# real context, and an entry whose value does not exist for an invocation is left out, never shown as
+# a placeholder.
+schema = "pipeline.v1"
+name = "example"
+
+# Flags that make a network-class command offline (a space also matches "=").
+offline_flags = ["--dry-run", "--driver fixture"]
+
+# What a --plan invocation writes instead of the command's outputs.
+plan_outputs = ["STATE:plans/{plan_hash}.json"]
+
+# Who the consumer is to the world. The harness hard-codes none of these; knobs are
+# "<env_prefix>_<KNOB>" (e.g. EX_NETWORK_APPROVED).
+[consumer]
+cli = "examplesite"  # never a short name that collides with a system command (`ex` is POSIX vi)
+env_prefix = "EX"
+data_env = "EXAMPLE_DATA"
+state_env = "EXAMPLE_STATE"
+state_dirname = "scrape-harness-example"
+default_site = "example.invalid"
+default_region = "sample-region"
+# The approval key (Secretive, Touch ID) by fingerprint: verify also needs this to match the
+# allowed_signers file named by EX_APPROVAL_SIGNERS, so swapping the pin needs two changes.
+approval_key_fingerprint = "SHA256:XbGaytyJKxDAvEdGEv719gGZoN84WE5Sdn+bYPaahsc"
+secret_envs = ["EX_API_KEY"]  # only the CLI reads these; the hook blocks any command expanding them
+site_hosts = ["example.invalid"]  # direct HTTP to these is blocked; pages go through the CLI's driver only
+
+# Where the consumer's own code and record schemas live, relative to this file. A consumer that is an
+# installed package can use entry points (scrape_harness.sources) instead.
+[plugins]
+python_path = ["examples"]
+schema_dirs = ["examples/example_site/schemas"]
+
+[plugins.sources]
+"example.invalid" = "example_site.source:ExampleSite"
+
+[groups]
+run = [
+  "DATA:runs/{run_file}.json",
+  "DATA:runs/{run_file}.log.jsonl",
+  "DATA:events.jsonl",
+  "STATE:crawlee/request_queues/{queue}",
+]
+
+# ── Stages, in order: the position is "Stage N/M" ────────────────────────────────────────────────
+
+[[stages]]
+name = "crawl-lists"
+network = "site"
+args = ["--subcategory", "widgets"]
+inputs = []
+outputs = ["DATA:observations.jsonl", "@run"]
+
+[[stages]]
+name = "fetch-ads"
+network = "site"
+inputs = ["DATA:observations.jsonl", "DATA:listings.jsonl"]
+outputs = [
+  "DATA:listings.jsonl",
+  "DATA:raw/{site}/ ({ads} ad snapshots)",
+  "DATA:derived/samples/{sample_file}.jsonl",
+  "@run",
+]
+
+[[stages]]
+name = "reparse"
+network = "none"
+inputs = ["DATA:listings.jsonl", "DATA:raw/"]
+outputs = ["DATA:listings.jsonl"]
+
+# ── Utilities: outside the stage order ───────────────────────────────────────────────────────────
+
+[[utilities]]
+name = "ab"
+network = "site"
+inputs = []
+outputs = ["DATA:derived/ab-{ab_at}.json", "@run"]
+
+[[utilities]]
+name = "probe robots"
+network = "site"  # ONE robots.txt GET after the egress preflight; gated like any site run
+inputs = []
+outputs = ["@run"]
+
+[[utilities]]
+name = "crawl resume"
+network = "site"
+inputs = ["STATE:crawlee/request_queues/{queue}", "DATA:runs/{run_file}.json"]
+outputs = ["DATA:observations.jsonl, listings.jsonl", "@run"]
+
+[[utilities]]
+name = "migrate"
+network = "none"
+inputs = ["OLD:every file"]
+outputs = ["DATA:data files", "STATE:state files"]
+
+[[utilities]]
+name = "cooldown"
+network = "none"
+inputs = ["DATA:events.jsonl"]
+outputs = ["DATA:events.jsonl"]
+
+[[utilities]]
+name = "approve"
+network = "none"
+operator_only = true
+inputs = []
+outputs = []
+
+[[utilities]]
+name = "browser open"
+network = "site"
+operator_only = true
+inputs = []
+outputs = []
+
+# ── `examplesite refresh`: the ONE on-demand chain, in this order, under ONE bounded Touch ID approval ──
+# (nested under [crawl] so a pinned plugin that knows pipeline.v1's top-level keys keeps working). Site
+# steps (crawl-lists, fetch-ads) consume the approval for exactly what they send; a `network = "paid"`
+# step must declare paid_gate = {count_field = "..."} (confirmed with `refresh --<step>-count N`) or
+# paid_exempt = "<why>". The example has no paid command; a consumer's geocode would read:
+#   {name = "geocode", paid_gate = {count_field = "pending"}},
+#   {name = "export-db", args = ["--out", "DATA:export"], paid_exempt = "uploads our own rows; no metered API"},
+
+[crawl.refresh]
+steps = [
+  { name = "crawl-lists", args = ["--subcategory", "widgets", "--stride", "2", "--start", "1", "--max-pages", "5"] },
+  { name = "fetch-ads", args = ["--max-fetches", "40"] },
+  { name = "reparse" },
+]
+
+# ── Typed data files under DATA: kind -> path + record schema ───────────────────────────────────
+
+[files.observations]
+path = "observations.jsonl"
+schema = "observation.v1"
+
+[files.listings]
+path = "listings.jsonl"
+schema = "listing.v1"
+
+[files.findings]
+path = "findings.jsonl"
+schema = "finding.v1"
+
+[files.events]
+path = "events.jsonl"
+schema = "event.v1"

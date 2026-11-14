@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "listing.v1.schema.json",
+  "title": "listing.v1",
+  "description": "One VERSION of one ad's page on the EXAMPLE site. Append-only JSONL; the latest version of an ad is the line with the greatest fetched_at for its (source.site, ad_id). Core floor (what the harness reads or writes): schema, ad_id, fetched_at, fetch_reason, source{site,url}, raw_ref, derived.method; content/location/time/site are the consumer's own.",
+  "type": "object",
+  "required": [
+    "schema",
+    "ad_id",
+    "source",
+    "fetched_at",
+    "content",
+    "location"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "listing.v1"
+    },
+    "ad_id": {
+      "type": "string",
+      "description": "The site's own stable id (here: the number at the end of the URL). Survives bumps and edits."
+    },
+    "fetched_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this version of the ad page was fetched (UTC)."
+    },
+    "fetch_reason": {
+      "enum": [
+        "new",
+        "card_changed",
+        "stale_7d",
+        "manual",
+        "reparse",
+        "recruit"
+      ],
+      "description": "Why this version exists. `reparse` = re-extracted OFFLINE from the saved snapshot (raw_ref) with a newer parser; fetched_at then stays the page's original fetch time."
+    },
+    "raw_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "bytes"
+      ],
+      "description": "The gzipped snapshot of the ad page this version was parsed from, under the DATA root (never in the repo).",
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^raw/[^/]+/[^/]+/[^/]+\\.html\\.gz$",
+          "description": "Relative to the data dir."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Of the UNCOMPRESSED HTML bytes."
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Uncompressed length."
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "site",
+        "url"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "site": {
+          "type": "string",
+          "examples": [
+            "example.invalid"
+          ]
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "category": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subcategory": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "region": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The site's region the ad is listed under (here: sample-region)."
+        }
+      }
+    },
+    "content": {
+      "type": "object",
+      "required": [
+        "title",
+        "description"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string",
+          "description": "Whole body text, whitespace-collapsed, never truncated (here: #description)."
+        },
+        "contact": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "website": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The seller's own site link, as printed."
+            }
+          }
+        },
+        "media_urls": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "description": "Public URLs only; media is never downloaded."
+        }
+      }
+    },
+    "time": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "first_published": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time",
+          "description": "schema.org datePublished as the page states it (keeps its own offset)."
+        },
+        "bumped_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time",
+          "description": "Last bump/repost at fetch time, site-local wall time converted with an explicit zone; null if the absolute and relative texts disagree."
+        }
+      }
+    },
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "city_label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The city/area the advertiser filed the ad under (human-chosen)."
+        },
+        "pin": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/geo"
+            }
+          ],
+          "description": "The site's own map pin (schema.org GeoCoordinates), approximate."
+        }
+      }
+    },
+    "site": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "example": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "facts"
+          ],
+          "properties": {
+            "facts": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "The ad page's facts list: lower-cased label -> value."
+            },
+            "page_schema_type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "derived": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method"
+      ],
+      "description": "Set by `reparse`: the parser version that produced this line.",
+      "properties": {
+        "method": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "geo": {
+      "type": "object",
+      "required": [
+        "lat",
+        "lon"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "lat": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        "lon": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "approximate": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "https://www.example.invalid/listings/widgets/sample-region?page=1": "list-p1.html",
+  "https://www.example.invalid/listings/widgets/sample-region?page=3": "list-p3.html",
+  "https://www.example.invalid/listings/widgets/sample-region/blue-widget-1000001": "ad-1000001.html",
+  "https://www.example.invalid/listings/widgets/sample-region/red-widget-1000002": "ad-1000002.html",
+  "https://www.example.invalid/listings/widgets/sample-region/green-widget-1000003": "ad-1000003.html",
+  "https://www.example.invalid/": "home.html",
+  "https://www.example.invalid/robots.txt": "robots.txt"
+}

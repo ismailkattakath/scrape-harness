@@ -1,0 +1,10 @@
+{
+  "schema": "pipeline.v1",
+  "name": "example",
+  "groups": {},
+  "plan_outputs": [],
+  "stages": [{ "name": "crawl-lists", "network": "sometimes", "inputs": [], "outputs": [] }],
+  "utilities": [],
+  "files": {},
+  "offline_flags": []
+}

@@ -1,0 +1,11 @@
+{
+  "schema": "incident.v1",
+  "id": "INC-20260115T120500Z-a1b2c3",
+  "event": "opened",
+  "at": "2026-01-15T12:05:00Z",
+  "kind": "challenge",
+  "code": 5,
+  "run_id": "2026-01-15T12:00:00Z-fetch-ads-desktop-abc123",
+  "stage": "fetch-ads",
+  "reason": "STOPPED: http_403 at https://www.example.invalid/listings/widgets/sample-region/x-1"
+}

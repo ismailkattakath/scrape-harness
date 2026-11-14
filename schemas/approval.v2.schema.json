@@ -1,0 +1,509 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "approval.v2.schema.json",
+  "title": "approval.v2",
+  "description": "One line of the approval ledger (the STATE root ($<state_env>)/approvals/ledger.jsonl, append-only, 0600, HASH-CHAINED). `approved` is written by `<cli> approve` after the operator's Touch ID signs it (an OpenSSH signature, namespace scrape-harness-approval, by the key pinned in allowed_signers AND by fingerprint in pipeline.toml); `used` when a networked command consumes it (single use). `standing` and `bounded` lines are signed BOUNDS (scheduled panel runs; one `<cli> refresh` chain); `spent` ends a bounded approval. `prev` is the sha256 of the previous approval.v2 line, so a deleted, edited or reordered line breaks the chain.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "kind",
+    "approval_id",
+    "plan_hash",
+    "at",
+    "expires_at",
+    "run_id",
+    "key_fp",
+    "prev"
+  ],
+  "properties": {
+    "schema": {
+      "const": "approval.v2"
+    },
+    "kind": {
+      "enum": [
+        "approved",
+        "used",
+        "standing",
+        "bounded",
+        "revoked",
+        "refunded",
+        "spent"
+      ],
+      "description": "approved: one exact plan, once. standing: a BOUNDED pre-signed approval for scheduled runs (bounds). bounded: ONE `<cli> refresh` chain's bounds (single use, at most 24 h; its steps each append a `used` line naming the refresh run id). used: a run (or refresh step) consumed an approval. refunded: one use given back (refused before any site request). revoked: an approval withdrawn. spent: a bounded approval's terminal line (its refresh completed or stopped for good). revoked, refunded, used and spent are unsigned: they can only reduce authority or record its use."
+    },
+    "approval_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "plan_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "run_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "used/refunded/spent: the run that consumed it (for a bounded approval: the refresh run id)."
+    },
+    "key_fp": {
+      "type": "string",
+      "pattern": "^SHA256:[A-Za-z0-9+/]{43}$",
+      "description": "The signing key's fingerprint; a `used` line carries the approved line's."
+    },
+    "prev": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "sha256 of the previous approval.v2 line (all zeros for the first)."
+    },
+    "sig": {
+      "type": "string",
+      "pattern": "^-----BEGIN SSH SIGNATURE-----\\n[A-Za-z0-9+/=\\n]+-----END SSH SIGNATURE-----\\n?$",
+      "description": "approved, standing and bounded only: the armored OpenSSH signature over the canonical record without `sig`."
+    },
+    "bounds": {
+      "type": "object",
+      "description": "standing and bounded only: the signed bounds (see $defs)."
+    },
+    "note": {
+      "type": "string",
+      "minLength": 1,
+      "description": "revoked, refunded, spent: why."
+    },
+    "step": {
+      "type": "string",
+      "minLength": 1,
+      "description": "used/refunded of a bounded approval: the refresh step."
+    },
+    "list_pages": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "used/refunded of a bounded approval: the step's list pages (at most)."
+    },
+    "ad_requests": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "used/refunded of a bounded approval: the step's ad requests."
+    },
+    "list_set": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "used/refunded of a bounded approval's crawl-lists step: the index of the signed list set it crawled."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "approved",
+              "standing",
+              "bounded"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "sig"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "sig"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "standing",
+              "bounded"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "bounds"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "bounds"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "standing"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "bounds": {
+            "$ref": "#/$defs/standing_bounds"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "bounded"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "bounds": {
+            "$ref": "#/$defs/bounded_bounds"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "revoked"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "note"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "refunded"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "note"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "spent"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "note"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "used",
+              "refunded"
+            ]
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "step"
+              ]
+            },
+            {
+              "required": [
+                "list_pages"
+              ]
+            },
+            {
+              "required": [
+                "ad_requests"
+              ]
+            },
+            {
+              "required": [
+                "list_set"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "dependentRequired": {
+        "step": [
+          "list_pages",
+          "ad_requests"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "standing_bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "standing: what every scheduled run must stay inside. plan_hash is sha256 of these bounds, canonical.",
+      "required": [
+        "panel_hash",
+        "site",
+        "max_runs",
+        "max_ad_requests_per_run",
+        "max_list_pages_per_run",
+        "min_interval_s",
+        "not_before",
+        "expires_at",
+        "egress_country",
+        "variants",
+        "max_rate_per_minute"
+      ],
+      "properties": {
+        "panel_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "sha256 of the panel file (advertisers + their ad_ids)."
+        },
+        "site": {
+          "type": "string",
+          "minLength": 1
+        },
+        "max_runs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        },
+        "max_ad_requests_per_run": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2000
+        },
+        "max_list_pages_per_run": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 200
+        },
+        "min_interval_s": {
+          "type": "integer",
+          "minimum": 3600
+        },
+        "not_before": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "At most 90 days after the signature (checked)."
+        },
+        "egress_country": {
+          "type": "string",
+          "pattern": "^[A-Z]{2}$"
+        },
+        "variants": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "max_rate_per_minute": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 60
+        },
+        "proxy": {
+          "type": "string",
+          "pattern": "^http://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*:[0-9]{2,5}$",
+          "description": "The run's proxy ([crawl] proxy url, host:port only, never credentials). Absent: no proxy. A run whose proxy differs is refused."
+        }
+      }
+    },
+    "bounded_bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "bounded: ONE refresh chain's bounds, which are also its saved plan (plan_hash = sha256 of them, canonical). Every networked step must stay inside them; the counts are cumulative over the refresh run.",
+      "required": [
+        "command",
+        "kind",
+        "site",
+        "egress_country",
+        "variants",
+        "backends",
+        "max_rate_per_minute",
+        "concurrency",
+        "politeness_override",
+        "lists",
+        "max_list_pages",
+        "max_ad_requests",
+        "fetch_reasons",
+        "steps",
+        "not_before",
+        "expires_at"
+      ],
+      "properties": {
+        "command": {
+          "const": "refresh"
+        },
+        "kind": {
+          "const": "bounded"
+        },
+        "site": {
+          "type": "string",
+          "minLength": 1
+        },
+        "egress_country": {
+          "type": "string",
+          "pattern": "^[A-Z]{2}$"
+        },
+        "proxy": {
+          "type": "string",
+          "pattern": "^http://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*:[0-9]{2,5}$",
+          "description": "The run's proxy ([crawl] proxy url, host:port only, never credentials). Absent: no proxy. A run whose proxy differs is refused."
+        },
+        "variants": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "backends": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "max_rate_per_minute": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "politeness_override": {
+          "type": "boolean"
+        },
+        "lists": {
+          "description": "The exact crawl-lists argument sets that decide what is fetched: one per crawl-lists step, in step order; each is crawled at most once per refresh run. A bounds doc signed before crawl-lists could repeat holds one set as an object ({} = no crawl-lists step).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/list_set"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/list_set"
+              }
+            }
+          ]
+        },
+        "max_list_pages": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_ad_requests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fetch_reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          },
+          "description": "The refresh's steps in order (crawl-lists may repeat)."
+        },
+        "not_before": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "At most 24 h after not_before (checked when signed and when used)."
+        }
+      }
+    },
+    "list_set": {
+      "type": "object",
+      "description": "One signed crawl-lists argument set.",
+      "additionalProperties": false,
+      "properties": {
+        "subcategory": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        },
+        "page_count": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stride": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "start": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "seed": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_pages": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

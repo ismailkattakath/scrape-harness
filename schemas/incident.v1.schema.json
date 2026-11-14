@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "incident.v1.schema.json",
+  "title": "incident.v1",
+  "description": "One line of STATE/ops/incidents.jsonl (append-only). An `opened` line is written when a run stops or is refused (challenge, cooldown, politeness, egress, approval, unreachable, incomplete) or stalls; an `acked` line, naming the same id, records who looked and what they did. An incident is OPEN until an acked line for its id exists. Files are truth: agents are told by doorbell lines (the monitor) and hooks, never by this file being edited.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "event", "at"],
+  "properties": {
+    "schema": { "const": "incident.v1" },
+    "id": { "type": "string", "pattern": "^INC-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}$" },
+    "event": { "enum": ["opened", "acked"] },
+    "at": { "type": "string", "format": "date-time" },
+    "kind": { "enum": ["challenge", "cooldown", "politeness", "egress", "approval", "stall", "unreachable", "incomplete"] },
+    "code": { "type": ["integer", "null"], "description": "The CLI exit code (5-10, 12 unreachable, 13 incomplete), or null for a stall." },
+    "run_id": { "type": ["string", "null"] },
+    "stage": { "type": ["string", "null"], "description": "The command (stage or utility) that stopped." },
+    "reason": { "type": "string" },
+    "by": { "enum": ["operator", "agent"], "description": "acked only: who acknowledged it." },
+    "note": { "type": "string", "minLength": 1, "description": "acked only: what was done or decided." }
+  },
+  "allOf": [
+    { "if": { "properties": { "event": { "const": "opened" } } }, "then": { "required": ["kind", "code", "run_id", "stage", "reason"] } },
+    { "if": { "properties": { "event": { "const": "acked" } } }, "then": { "required": ["by", "note"] } }
+  ]
+}

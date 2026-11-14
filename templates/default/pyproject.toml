@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "site-pipeline"
+version = "0.1.0"
+description = "A scrape-harness pipeline."
+requires-python = ">=3.12"
+dependencies = ["scrape-harness"]
+
+[project.scripts]
+# The CLI is the harness's; pipeline.toml makes it this project's. Rename the key to [consumer].cli.
+FILL-ME = "scrape_harness.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/site_source"]
+
+[tool.ruff]
+line-length = 110
+extend-exclude = [".claude/statusline.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

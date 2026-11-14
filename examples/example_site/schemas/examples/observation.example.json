@@ -1,0 +1,26 @@
+{
+  "schema": "observation.v1",
+  "ad_id": "1000001",
+  "site": "example.invalid",
+  "seen_at": "2026-01-15T11:58:00Z",
+  "ad_url": "https://www.example.invalid/listings/widgets/sample-region/blue-widget-1000001",
+  "list": {
+    "url": "https://www.example.invalid/listings/widgets/sample-region?page=1",
+    "subcategory": "widgets",
+    "page": 1,
+    "page_count": 3,
+    "position": 1,
+    "sponsored": false,
+    "sample_weight": null
+  },
+  "card": {
+    "title": "Blue widget",
+    "city_label": "Sampletown",
+    "example": {
+      "price": 12,
+      "featured": true
+    }
+  },
+  "bumped_at": null,
+  "card_hash": "sha256:0000000000000001"
+}
