@@ -140,6 +140,10 @@
             # the build user cannot initialise it (darwin _nixbld: "sandbox initialization failed", then
             # SEGV), so only the build's tests turn it off. The wrapper and the dev shell never set it.
             export CRAWLEE_DISABLE_BROWSER_SANDBOX=true
+            # Chromium's crash reporter keeps its database under HOME; the build's HOME (/homeless-shelter)
+            # does not exist, so chrome_crashpad_handler exits ("--database is required") and Chromium
+            # aborts at launch (measured on a GitHub ubuntu-24.04-arm runner). A writable HOME fixes it.
+            export HOME="$TMPDIR"
           '';
           nativeCheckInputs = [
             pkgs.python3Packages.pytestCheckHook
