@@ -29,6 +29,116 @@ def sample_weight(page_count: int, pages: list[int]) -> float:
     return round(page_count / len(pages), 6)
 
 
+# ── the frontier walk: its reference crawl and its confirmed anchor (ADR-0017 §A.2, §A.3) ──────────────
+
+# The list outcomes a reference may have: read contiguously from page 1 to a positive END, a confirmed anchor
+# or the signed ceiling. A subset of the good crawls (liveness.Rules.good_list_status): `ok` is a sample or
+# named pages, never contiguous, so never a reference.
+REFERENCE_STATUS = ("anchored", "ceiling_hit", "end")
+WALK_MODES = ("walk", "frontier")  # stride 1, read from page 1 (the stride-k depth walk is never a reference)
+
+
+def reference_of(doc: dict, observations) -> dict:
+    """The reference a frontier walk compares against: {crawl_id, rank, page, last_page, gap}. rank = each id's
+    place in the crawl's PARSED order (page, then position; a skipped slot leaves no hole), the first place when
+    an id was kept twice; page = the reference page that place is on; last_page = the last page it read
+    (pages_read: contiguous from 1)."""
+    rid, lst = doc["run_id"], doc.get("list") or {}
+    rows = sorted(
+        (o["list"]["page"], o["list"]["position"], o["ad_id"])
+        for o in observations
+        if o.get("crawl_id") == rid
+    )
+    rank: dict[str, int] = {}
+    page: dict[str, int] = {}
+    for p, _, ad in rows:
+        if ad not in rank:
+            rank[ad], page[ad] = len(rank), p
+    last = lst.get("pages_read") or max((p for p, _, _ in rows), default=0)
+    return {"crawl_id": rid, "rank": rank, "page": page, "last_page": last, "gap": lst.get("gap")}
+
+
+def frontier_reference(
+    runs, events, observations, *, site: str, subcategory: str, region: str
+) -> dict | None:
+    """The reference crawl of a frontier walk, or None (a bootstrap: the walk reads to its END or ceiling).
+    The LATEST crawl-lists run of the same site, subcategory and region that was read contiguously from page 1
+    (mode walk or frontier, stride 1), whose corrected status is completed (liveness.good_crawl, without the
+    legacy pass) and whose list.status is in REFERENCE_STATUS: a terminal stop is never one. Latest by
+    (created_at, run_id). Pure: the caller passes the records in."""
+    from . import liveness
+
+    runs = list(runs)
+    good = liveness.good_crawl(runs, events, legacy=False)
+    valid = [
+        d
+        for d in runs
+        if d.get("command") == "crawl-lists"
+        and d.get("source") == site
+        and (lst := d.get("list") or {}).get("mode") in WALK_MODES
+        and lst.get("stride", 1) == 1
+        and lst.get("subcategory") == subcategory
+        and lst.get("region") == region
+        and lst.get("status") in REFERENCE_STATUS
+        and good(d["run_id"])
+    ]
+    if not valid:
+        return None
+    return reference_of(max(valid, key=lambda d: (d.get("created_at") or "", d["run_id"])), observations)
+
+
+def _candidate(walk: dict, page: int, ref: dict, k: int) -> int | None:
+    """The reference rank of the LAST card of the first (topmost) window of k consecutive parsed cards on
+    `page` whose ids hold consecutive places in the reference's parsed order, none seen on an earlier page of
+    this walk, and whose last card sat on a REFERENCE page before the reference's last page read (so the
+    reference read on past it: a confirmation page has reference content to match). None when there is none.
+    The window's place is judged in the reference, never by the walk's page number: new bumps push the
+    boundary deeper every day, often past the reference's own last page."""
+    rank, ref_page = ref["rank"], ref["page"]
+    earlier = {a for p, ids in walk["pages"].items() if p < page for a in ids}
+    run: list[int] = []
+    for a in walk["pages"].get(page, ()):
+        r = rank.get(a) if a not in earlier else None
+        run = run + [r] if r is not None and run and r == run[-1] + 1 else [r] if r is not None else []
+        if len(run) >= k and ref_page[a] < ref["last_page"]:
+            return run[-1]
+    return None
+
+
+def _confirms(ids: list[str], last: int, ref: dict, policy) -> bool:
+    """ONE confirmation page: at least confirm_share of its parsed cards are reference ids BELOW the
+    candidate's last card, and they keep the reference order with at most confirm_inversions adjacent
+    inversions. Exact arithmetic (Fraction), so 9 of 10 is 90%."""
+    from fractions import Fraction
+
+    if not ids:
+        return False
+    below = [r for a in ids if (r := ref["rank"].get(a)) is not None and r > last]
+    if Fraction(len(below), len(ids)) < Fraction(str(policy.confirm_share)):
+        return False
+    inv = sum(1 for x, y in zip(below, below[1:], strict=False) if y < x)
+    return len(below) < 2 or Fraction(inv, len(below) - 1) <= Fraction(str(policy.confirm_inversions))
+
+
+def frontier_stop(walk: dict, ref: dict | None, policy) -> dict | None:
+    """Whether the frontier walk may stop after the page it just handled: {page, confirm_page, ref_crawl_id}
+    (the anchor) or None (keep walking). Pure, and a function of the whole walk so far, so a resume between
+    the candidate page and its confirmation page needs no saved candidate.
+
+    walk = {order, page, pages: {page: parsed ids in order}} (this crawl's kept rows); ref = reference_of(...)
+    or None. Two steps (ADR-0017 §A.2): a CANDIDATE on page n-1 (`_candidate`, K = policy.frontier_k), and its
+    CONFIRMATION on page n (`_confirms`). A failed confirmation drops the candidate; page n is then searched for
+    the next one, which page n+1 confirms or not. Early stop only when the source declared order "bump_desc"
+    (exactly): any other order walks to a positive END or the signed ceiling."""
+    if ref is None or walk.get("order") != "bump_desc":
+        return None
+    n = walk["page"]
+    last = _candidate(walk, n - 1, ref, policy.frontier_k)
+    if last is None or not _confirms(walk["pages"].get(n, []), last, ref, policy):
+        return None
+    return {"page": n - 1, "confirm_page": n, "ref_crawl_id": ref["crawl_id"]}
+
+
 def _t(s: str) -> datetime:
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 

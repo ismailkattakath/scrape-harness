@@ -21,7 +21,14 @@ Fields (judgement values; changing one is an operator decision):
                  fold, the breaker, admission): a test pins it to a fingerprint of that code, so changing the
                  code fails the suite until this is bumped. v2: the good-crawl allowlist, the shared adkey join
                  and the cross-run parse streak (2026-11-19). v3: the census walk's outcomes (end,
-                 ceiling_hit; anchored reserved) join the good-crawl allowlist.
+                 ceiling_hit; anchored reserved) join the good-crawl allowlist. v4: the frontier walk's anchor
+                 and reference rules (plan.frontier_stop, plan.frontier_reference).
+  frontier_k     the frontier walk's candidate: this many consecutive parsed cards holding consecutive places
+                 in the reference crawl's parsed order (plan.frontier_stop). 5.
+  confirm_share  the confirmation page: at least this share of its parsed cards are reference ids below the
+                 candidate. 0.9.
+  confirm_inversions  and those ids keep the reference's order with at most this share of adjacent
+                 inversions. 0.05.
 The digest also covers the rules' constants in code (`rule_constants`). A refresh's bounds sign only the
 digest, so a rule that is not in it could change between an approval and a resume unnoticed."""
 
@@ -46,13 +53,18 @@ class SyncPolicy:
     breaker_alpha: float = 1e-4
     breaker_floor: int = 5
     parse_streak: bool = True
-    lanes: str = "select_ads.v3"
+    lanes: str = "select_ads.v4"
+    frontier_k: int = 5
+    confirm_share: float = 0.9
+    confirm_inversions: float = 0.05
 
     def __post_init__(self) -> None:
         if not 0 <= self.rho <= 1:
             raise ValueError(f"rho must be in [0, 1], not {self.rho}")
         if self.window_h <= 0 or self.stale_after_d < 0 or self.readmit_h < 0:
             raise ValueError("window_h must be > 0; stale_after_d and readmit_h >= 0")
+        if self.frontier_k < 2 or not 0 < self.confirm_share <= 1 or not 0 <= self.confirm_inversions < 1:
+            raise ValueError("frontier_k must be >= 2, confirm_share in (0, 1], confirm_inversions in [0, 1)")
 
     @property
     def window(self) -> timedelta:
@@ -75,7 +87,8 @@ class SyncPolicy:
     def rule_constants(self) -> dict:
         """The selection rules' CONSTANTS in code, signed with the tunables: the good-crawl status sets
         (liveness.Rules), the gone reasons that are the site's own statement (breaker.POSITIVE) and the revisit
-        lane's reasons (plan.REVISIT). The rule CODE is versioned by `lanes`, which a test pins to it."""
+        lane's reasons (plan.REVISIT) and the list outcomes a frontier reference may have
+        (plan.REFERENCE_STATUS). The rule CODE is versioned by `lanes`, which a test pins to it."""
         from . import breaker, plan
 
         r = self.rules()
@@ -84,6 +97,7 @@ class SyncPolicy:
             "good_list_status": sorted(r.good_list_status),
             "positive_gone": sorted(breaker.POSITIVE),
             "revisit": list(plan.REVISIT),
+            "reference_status": list(plan.REFERENCE_STATUS),
         }
 
     def doc(self) -> dict:
