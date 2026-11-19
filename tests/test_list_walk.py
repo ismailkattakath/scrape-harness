@@ -272,6 +272,41 @@ def test_old_plans_hash_as_before(networked, capsys):  # noqa: F811
     assert approvals.list_args(doc) == {k: doc[k] for k in approvals.LIST_KEYS}
 
 
+# Recorded ONCE from the code before the walk modes existed (the slice-1 tip), for these exact argvs: a plan
+# doc a later change alters (even a key that defaults to None) no longer matches, and every pending approval
+# of such a plan would stop matching (exit 10).
+OLD_PLAN_HASHES = {
+    "sample": ([*BASE, "--stride", "2", "--start", "1", "--seed", "7"],
+               "c509e0371fd36c047f010c4714826b007a4728c1235ce83d451694b28fbdb054"),
+    "discover": (BASE, "a5bacf549b61f285c56f4da0429327c66a150d9b15fadb1e7cf2e4da84d0686c"),
+    "pages": ([*BASE, "--pages", "2,5"], "ef1e7465ed60429c017661bd2e9cee66922c0759e73069e70ba7a3eb8eb33b53"),
+}  # fmt: skip
+OLD_RESUME_PLAN = {
+    "backends": ["fixture"], "command": "crawl resume", "concurrency": 1, "egress_country": "CA", "max_pages": 60,
+    "max_tasks_per_minute": 7, "pending": 3, "politeness_override": False, "resumes": "crawl-lists",
+    "site": "example.invalid", "variants": ["desktop"],
+}  # fmt: skip
+
+
+@pytest.mark.parametrize("name", sorted(OLD_PLAN_HASHES))
+def test_old_plans_hash_exactly_as_recorded(networked, capsys, name):  # noqa: F811
+    argv, recorded = OLD_PLAN_HASHES[name]
+    assert plan_hash(capsys, argv) == recorded
+
+
+def test_an_old_list_resume_plan_is_the_recorded_doc(networked, capsys):  # noqa: F811
+    """A resume of a crawl-lists run that is not a walk signs exactly the doc it signed before (its run id
+    aside, which is random)."""
+    job = crawl.Run.new("crawl-lists", "desktop", "example.invalid")
+    meta = store.state_dir() / "crawlee" / "request_queues" / job.doc["queue"].lower() / "__metadata__.json"
+    meta.parent.mkdir(parents=True)
+    meta.write_text(json.dumps({"pending_request_count": 3, "handled_request_count": 2}))
+    h = plan_hash(capsys, ["crawl", "resume", "--run-id", job.doc["run_id"], "--driver", "fixture",
+                           "--fixtures", "unused"])  # fmt: skip
+    doc = approvals.load_plan(h)
+    assert doc.pop("run_id") == job.doc["run_id"] and doc == OLD_RESUME_PLAN
+
+
 def test_mode_and_min_pages_move_the_plan_hash(networked, capsys):  # noqa: F811
     plain = plan_hash(capsys, BASE)
     walked = plan_hash(capsys, [*BASE, "--mode", "walk"])
