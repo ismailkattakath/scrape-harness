@@ -295,6 +295,10 @@ def parse_ttl(ttl: str) -> timedelta:
 
 def summary(plan: dict, plan_hash: str, ttl: str) -> str:
     what = ", ".join(f"{k} {plan[k]}" for k in ("site", "variants", "backends") if plan.get(k))
+    if plan.get("pages"):  # crawl-lists --pages: the operator reads which pages, and whether they are saved
+        what += f", pages {','.join(map(str, plan['pages']))}" + (
+            ", snapshots" if plan.get("snapshot") else ""
+        )
     return f"Approve {plan['command']} ({what}) for {ttl}? plan {plan_hash[:12]}"
 
 

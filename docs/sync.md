@@ -257,6 +257,10 @@ the handler's own stop.
 `list.status` `past_end` or `redirected`, never `ok`. So it is never a good
 crawl: its sightings feed no fetch-ads gate and it is never a reference crawl.
 `list.snapshot{dir, saved, past_end, redirected}` on the run doc names them.
+A listed page that left no row is still a zero yield (exit 14), even beside a
+past-end page. A redirect means a different path or query: the host's case, a
+default port and a fragment are ignored, because a browser's `page.url` can
+differ from the request in exactly these.
 
 **A refused write** (the data folder, a full disk) takes slice 1's path: exit 4,
 the list page handed back for the resume, no retry GET.

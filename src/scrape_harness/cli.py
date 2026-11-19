@@ -133,14 +133,17 @@ def list_outcome(job: crawl.Run, stop: crawl.Stop | None) -> crawl.Stop | None:
     if stop is not None:
         return None
     snap = lst.get("snapshot") or {}
-    if snap.get("past_end") or snap.get("redirected"):  # an evidence run: completed, never a good crawl
-        lst["status"] = "past_end" if snap.get("past_end") else "redirected"
-        return None
-    if n == 0 and job.doc.get("requests", {}).get("list_pages", 0) > 0:
+    unlisted = len(snap.get("past_end", ())) + len(snap.get("redirected", ()))
+    # pages that were only past-end or redirected wrote no rows by design; any page handed to the parser
+    # (listed) that left no row is still a zero yield
+    if n == 0 and job.doc.get("requests", {}).get("list_pages", 0) > 0 and snap.get("saved", 1) > unlisted:
         lst["status"] = "zero_yield"
         job.doc["status"] = "stopped"
         return crawl.Stop(crawl.EXIT_PARSE, f"STOPPED: zero yield: {job.doc['requests']['list_pages']} list "
                           "page requests and no observation written (no cards, or the parser drifted)")  # fmt: skip
+    if unlisted:  # an evidence run: completed, never a good crawl (liveness.good_crawl allows only ok)
+        lst["status"] = "past_end" if snap.get("past_end") else "redirected"
+        return None
     lst["status"] = "ok"
     return None
 

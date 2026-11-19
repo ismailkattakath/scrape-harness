@@ -348,6 +348,15 @@ def stop_snapshot(run_id: str, html: str) -> str:
     return rel
 
 
+def _served_at(res: FetchResult, final: bool = True) -> tuple:
+    """The URL a page was served at, as a list snapshot compares it: scheme and host case-folded, the default
+    port and the fragment dropped (a browser's page.url may differ from the request in exactly these), path and
+    query kept exactly. A different path or query is a redirect: the cards are not the page asked for."""
+    u = urlsplit((res.final_url or res.url) if final else res.url)
+    port = u.port if u.port not in (None, 80, 443) else None
+    return (u.scheme.lower(), (u.hostname or "").lower(), port, u.path or "/", u.query)
+
+
 def _challenge(job: Run, url: str, reason: str, res: FetchResult | None = None, hops=None) -> Stop:
     rid, site = job.doc["run_id"], job.doc["source"]
     job.doc["challenges"] += 1
@@ -988,7 +997,7 @@ async def _crawl(
         outcome = (
             "past_end" if reason in challenge.GONE
             else "stopped" if reason
-            else "redirected" if (res.final_url or res.url) != res.url
+            else "redirected" if _served_at(res) != _served_at(res, final=False)
             else "listed"
         )  # fmt: skip
         page, keep = int(m["page"]), reason is None or reason in challenge.GONE + challenge.EXPECTED_MISSING
@@ -1020,8 +1029,15 @@ async def _crawl(
                                    seen_at=utcnow())  # fmt: skip
         except Exception:  # noqa: BLE001 - evidence only: an unparsable past-end page is still recorded
             return
-        store.update_list_sidecar(job.doc["source"], rid, m["page"], parsed=len(lp.observations),
-                                  skipped=getattr(lp, "skipped", None))  # fmt: skip
+        try:
+            store.update_list_sidecar(job.doc["source"], rid, m["page"], parsed=len(lp.observations),
+                                      skipped=getattr(lp, "skipped", None))  # fmt: skip
+        except (store.DataDirError, OSError):
+            raise
+        except Exception as e:  # noqa: BLE001 - never crawlee's retry (a second GET): treat it as refused
+            raise OSError(
+                f"list snapshot counts of page {m['page']} not saved ({type(e).__name__}: {e})"
+            ) from e
 
     async def answered(ctx, res) -> None:
         n_hops = hops.get(ctx.request.unique_key)

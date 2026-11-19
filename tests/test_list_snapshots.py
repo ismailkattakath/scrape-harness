@@ -124,6 +124,61 @@ def test_a_past_end_404_is_saved_recorded_and_not_a_challenge(data_dir, tmp_path
     assert s["parsed"] == 0
     assert not [e for e in store.read("events") if e["kind"] in ("challenge", "cooldown")]
     assert {o["list"]["page"] for o in store.read("observations")} == {1, 3}
+    assert not good(rid)
+
+
+def good(run_id) -> bool:
+    from scrape_harness import liveness
+
+    return liveness.good_crawl(crawl.run_docs(), list(store.read("events")), liveness.DEFAULT, legacy=False)(
+        run_id
+    )
+
+
+def test_a_plain_pages_run_is_a_good_crawl(data_dir, tmp_path):
+    assert crawl_lists(fixtures(tmp_path), "--pages", "1,3", "--snapshot") == 0
+    (doc,) = run_docs(data_dir)
+    assert good(doc["run_id"])
+
+
+def test_listed_pages_with_no_rows_are_still_a_zero_yield_beside_a_past_end_page(data_dir, tmp_path):
+    empty = "<!doctype html><html><head><title>W</title></head><body><main id=results></main></body></html>"
+    d = fixtures(tmp_path, {P1: "empty.html", P400: {"file": "empty.html", "status": 404}},
+                 [("empty.html", empty)])  # fmt: skip
+    assert crawl_lists(d, "--pages", "1,400", "--snapshot") == crawl.EXIT_PARSE
+    (doc,) = run_docs(data_dir)
+    assert doc["list"]["status"] == "zero_yield" and doc["list"]["snapshot"]["past_end"] == [400]
+
+
+def test_only_past_end_pages_complete_without_a_zero_yield(data_dir, tmp_path):
+    d = fixtures(tmp_path, {P400: {"file": "list-p3.html", "status": 410}})
+    assert crawl_lists(d, "--pages", "400", "--snapshot") == 0
+    (doc,) = run_docs(data_dir)
+    assert doc["list"]["status"] == "past_end"
+
+
+def test_the_flag_rides_on_the_sample_page_one_plans(data_dir, tmp_path):
+    d = fixtures(tmp_path)
+    assert crawl_lists(d, "--stride", "2", "--start", "1", "--snapshot") == 0
+    (doc,) = run_docs(data_dir)
+    assert {p.name for p in snap_dir(data_dir, doc["run_id"]).glob("*.html.gz")} == {"1.html.gz", "3.html.gz"}
+
+
+@pytest.mark.parametrize(
+    ("asked", "served", "moved"),
+    [
+        (P1, P1 + "#top", False),
+        (P1, P1.replace("https://www.", "HTTPS://WWW."), False),
+        (P1, P1.replace(".invalid/", ".invalid:443/"), False),
+        (P400, P1, True),
+        (P1, P1 + "&sort=new", True),
+    ],
+)
+def test_a_redirect_is_a_different_path_or_query(asked, served, moved):
+    from scrape_harness.interfaces import FetchResult
+
+    res = FetchResult(asked, 200, served, "")
+    assert (crawl._served_at(res) != crawl._served_at(res, final=False)) is moved  # noqa: SLF001
 
 
 def test_without_snapshot_a_404_list_page_is_still_a_challenge_stop(data_dir, tmp_path):
@@ -144,6 +199,7 @@ def test_a_redirected_page_is_saved_with_its_final_url_and_keeps_no_rows(data_di
     assert s["requested_url"] == P400 and s["final_url"] == P3 and s["outcome"] == "redirected"
     assert s["status"] == 200 and s["parsed"] == 1  # counted, not kept: its cards are not page 400's
     assert doc["list"]["status"] == "redirected" and doc["list"]["snapshot"]["redirected"] == [400]
+    assert not good(rid)
     assert {o["list"]["page"] for o in store.read("observations")} == {1}
 
 
@@ -227,6 +283,9 @@ def test_pages_and_snapshot_are_signed_into_the_plan_hash(networked, capsys):  #
     main([*RUN, "--pages", "1,2,400", "--snapshot", "--plan"])
     out = json.loads(capsys.readouterr().out)["plan"]
     assert out["pages"] == [1, 2, 400] and out["snapshot"] is True
+    from scrape_harness import approvals
+
+    assert "pages 1,2,400, snapshots" in approvals.summary(out, "0" * 64, "30m")  # what Touch ID shows
 
 
 def test_an_approved_pages_plan_sends_exactly_its_pages(networked, capsys, tmp_path):  # noqa: F811
