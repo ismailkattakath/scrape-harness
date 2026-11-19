@@ -156,7 +156,10 @@ def list_handler(job: crawl.Run, source, max_pages: int):
             raise crawl.Stop(crawl.EXIT_PARSE, f"STOPPED: end_unknown: list page {m['page']} carries the end "
                              f"marker ({reason}) but is not an END (" + ("served at another URL"
                              if crawl.redirected(res) else f"{len(lp.observations)} cards") + ")")  # fmt: skip
-        if not lp.observations:  # 0 cards and no positive END: the list's end is unknown, or the parser broke
+        # a walk's 0-card page with no positive END: the list's end is unknown, or the parser broke, and the walk
+        # would lose its next page. Samples and named pages read every planned page as before (an empty page
+        # writes no row; list_outcome's zero-yield backstop judges the whole run)
+        if walk and not lp.observations:
             lst["status"] = "zero_yield" if m["page"] == 1 else "end_unknown"
             raise crawl.Stop(crawl.EXIT_PARSE, f"STOPPED: {lst['status']}: list page {m['page']} gave 0 cards "
                              "and no end marker")  # fmt: skip

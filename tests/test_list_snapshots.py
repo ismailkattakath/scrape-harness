@@ -146,10 +146,31 @@ def test_listed_pages_with_no_rows_are_still_a_zero_yield_beside_a_past_end_page
     d = fixtures(tmp_path, {P1: "empty.html", P400: {"file": "empty.html", "status": 404}},
                  [("empty.html", empty)])  # fmt: skip
     assert crawl_lists(d, "--pages", "1,400", "--snapshot") == crawl.EXIT_PARSE
-    # page 1's 0 cards (no end marker) stop the run at once (ADR-0017 A.1): page 400 is never sent
-    assert list_gets() == [P1]
+    assert list_gets() == [P1, P400]  # named pages are all read: only a walk stops at a 0-card page
     (doc,) = run_docs(data_dir)
-    assert doc["list"]["status"] == "zero_yield" and doc["list"]["snapshot"]["past_end"] == []
+    assert doc["list"]["status"] == "zero_yield" and doc["list"]["snapshot"]["past_end"] == [400]
+
+
+EMPTY = "<!doctype html><html><head><title>W</title></head><body><main id=results></main></body></html>"
+
+
+def test_a_named_pages_run_reads_past_an_empty_page(data_dir, tmp_path):
+    """Only a walk stops at a 0-card page with no END (it would otherwise lose its next page). Named pages
+    and samples read every planned page, as before the walk modes: an empty page writes no row."""
+    d = fixtures(tmp_path, {P3: "empty.html"}, [("empty.html", EMPTY)])
+    assert crawl_lists(d, "--pages", "3,1") == 0
+    assert list_gets() == [P3, P1]
+    (doc,) = run_docs(data_dir)
+    assert doc["status"] == "completed" and doc["list"]["status"] == "ok"
+    assert {o["list"]["page"] for o in store.read("observations")} == {1}
+
+
+def test_a_sample_reads_past_an_empty_page(data_dir, tmp_path):
+    d = fixtures(tmp_path, {P3: "empty.html"}, [("empty.html", EMPTY)])
+    assert crawl_lists(d, "--page-count", "3", "--stride", "2", "--start", "1") == 0
+    assert list_gets() == [P1, P3]
+    (doc,) = run_docs(data_dir)
+    assert doc["status"] == "completed" and doc["list"]["status"] == "ok"
 
 
 def test_only_past_end_pages_complete_without_a_zero_yield(data_dir, tmp_path):

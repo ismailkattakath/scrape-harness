@@ -245,15 +245,25 @@ def test_a_404_with_the_marker_and_cards_stops_and_keeps_none_of_its_cards(data_
     assert {o["list"]["page"] for o in store.read("observations")} == {1}  # page 1's rows are kept
 
 
-@pytest.mark.parametrize("status", [200, 404])
-def test_redirect_to_page1_with_the_marker_is_not_end(data_dir, tmp_path, marker, status):
-    d = fixtures(tmp_path, {P400: {"file": "end.html", "status": status, "final_url": P1}},
+def test_redirect_to_page1_with_the_marker_is_not_end(data_dir, tmp_path, marker):
+    """A marked 404 served at another URL is no END, and was a stop before the marker existed: exit 14."""
+    d = fixtures(tmp_path, {P400: {"file": "end.html", "status": 404, "final_url": P1}},
                  [("end.html", EMPTY_WITH_MARK)])  # fmt: skip
     assert crawl_lists(d, "--pages", "1,400,3") == crawl.EXIT_PARSE
     assert list_gets() == [P1, P400]
     (doc,) = run_docs(data_dir)
     assert doc["list"]["status"] == "end_unknown" and "end_read_page" not in doc["list"]
     assert doc["stop"]["code"] == crawl.EXIT_PARSE
+
+
+def test_a_redirected_200_with_the_marker_is_not_end_and_named_pages_read_on(data_dir, tmp_path, marker):
+    """The same page as a 200 is no END either. Outside a walk a 0-card page is read past, as it always was."""
+    d = fixtures(tmp_path, {P400: {"file": "end.html", "status": 200, "final_url": P1}},
+                 [("end.html", EMPTY_WITH_MARK)])  # fmt: skip
+    assert crawl_lists(d, "--pages", "1,400,3") == 0
+    assert list_gets() == [P1, P400, P3]
+    (doc,) = run_docs(data_dir)
+    assert doc["list"]["status"] == "ok" and "end_read_page" not in doc["list"]
 
 
 @pytest.mark.parametrize(
@@ -274,10 +284,15 @@ def test_end_marker_never_hides_challenge(data_dir, tmp_path, marker, entry):
 
 
 def test_broken_selector_not_end(data_dir, tmp_path):
-    """0 cards past page 1 with no marker (e.g. a card selector that no longer matches) is never an END."""
-    empty = EMPTY_WITH_MARK.replace('<div id="no-results">No widgets match</div>', "")
-    d = fixtures(tmp_path, {P3: "empty.html"}, [("empty.html", empty)])
-    assert crawl_lists(d, "--pages", "1,3") == crawl.EXIT_PARSE
+    """0 cards past page 1 with no marker (e.g. a card selector that no longer matches) is never an END: a walk
+    stops there, end_unknown, exit 14."""
+    from test_list_walk import P, site
+
+    d = site(tmp_path, [[2000001, 2000002, 2000003], [2000004]])
+    urls = json.loads((d / "urls.json").read_text())
+    (d / "urls.json").write_text(json.dumps(urls | {P(2): "empty.html"}))
+    (d / "empty.html").write_text(EMPTY_WITH_MARK.replace('<div id="no-results">No widgets match</div>', ""))
+    assert crawl_lists(d, "--mode", "walk", "--max-pages", "10") == crawl.EXIT_PARSE
     (doc,) = run_docs(data_dir)
     assert doc["status"] == "stopped" and doc["list"]["status"] == "end_unknown"
     assert doc["list"]["observations_written"] == 3  # rows are kept: page 1 was read
@@ -288,14 +303,14 @@ def test_broken_selector_not_end(data_dir, tmp_path):
 
 def test_a_marker_on_page_one_never_rides_on_to_the_pages_it_plans(data_dir, tmp_path, marker):
     """Page 1 with cards AND the marker is a normal page. The sample it plans must not inherit the nomination:
-    a planned page with 0 cards and no marker of its own is end_unknown, never an END."""
+    a planned page with 0 cards and no marker of its own is never an END (a sample reads past it)."""
     p1 = (FIXTURES / "list-p1.html").read_text().replace("</body>", '<div id="no-results">x</div></body>')
     empty = EMPTY_WITH_MARK.replace('<div id="no-results">No widgets match</div>', "")
     d = fixtures(tmp_path, {P1: "p1.html", P3: "empty.html"}, [("p1.html", p1), ("empty.html", empty)])
-    assert crawl_lists(d, "--stride", "2", "--start", "1") == crawl.EXIT_PARSE
+    assert crawl_lists(d, "--stride", "2", "--start", "1") == 0
     assert list_gets() == [P1, P3]
     (doc,) = run_docs(data_dir)
-    assert doc["list"]["status"] == "end_unknown" and "end_read_page" not in doc["list"]
+    assert doc["list"]["status"] == "ok" and "end_read_page" not in doc["list"]
 
 
 def test_a_200_page_without_the_list_expectation_but_with_the_marker_is_end(data_dir, tmp_path, marker):

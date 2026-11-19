@@ -36,8 +36,8 @@ the gate, with 0 GETs. It opens a `parse` incident. A breaker trip opens a
 |---|---|---|
 | A list handler raised (a contract error or a parser crash) | 14 | `list.status: failed` |
 | Page 1 named no page count | 14 | `list.status: parse_drift` |
-| Page 1 gave 0 cards with no positive END | 14 | `list.status: zero_yield` |
-| A later page gave 0 cards with no positive END, or carried the end marker but is not an END | 14 | `list.status: end_unknown` |
+| A walk's page 1 gave 0 cards with no positive END | 14 | `list.status: zero_yield` |
+| A walk's later page gave 0 cards with no positive END, or any page carried the end marker on a 404/410 but is not an END | 14 | `list.status: end_unknown` |
 | A census walk ENDED before its signed `--min-pages` | 14 | `list.status: short_census` |
 | A census walk drained with neither an END nor its ceiling | 14 | `list.status: end_unknown` |
 | List pages answered, but 0 observations were written | 14 | `list.status: zero_yield` |
@@ -342,8 +342,8 @@ broken card selector also gives 0 cards.
 | Page 1 is that END | an empty subcategory: `end`, `end_page: 0`, 0 observations, exit 0 |
 | Marker and cards on a 200 page | a normal page: rows kept |
 | Marker on a 404/410 or `unexpected_page` that is not an END (cards, or a redirect) | `end_unknown`, exit 14; none of its cards are kept |
-| Marker, 0 cards, at another URL (200) | `end_unknown` (page 1: `zero_yield`), exit 14 |
-| 0 cards, no marker | page 1: `zero_yield`; later pages: `end_unknown`; exit 14, earlier rows kept |
+| Marker, 0 cards, at another URL (200) | in a walk: `end_unknown` (page 1: `zero_yield`), exit 14; a sample or named pages read past it |
+| 0 cards, no marker | in a walk: page 1 `zero_yield`, later pages `end_unknown`, exit 14, earlier rows kept. A sample or named pages read past it (no row), as before the walks; the run's zero-yield backstop still applies |
 | 404/410 without the marker | as before: exit 5 without `--snapshot`, `past_end` evidence with it |
 
 **With `--snapshot`** the END page keeps its own outcome (`past_end` for a

@@ -30,8 +30,10 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   at the URL asked for: `list.status: end`, `list.end_read_page`,
   `list.end_method`. A sign-in wall or consent gate is never nominated (it
   stays a stop), and optional `Source.end_statuses` (e.g. `(404, 410)`)
-  limits END to the site's measured past-end statuses. A 0-card page with no END stops with exit 14 at once:
-  `zero_yield` on page 1, `end_unknown` after it. run.v1 `list.status` gains
+  limits END to the site's measured past-end statuses. In a walk, a 0-card
+  page with no END stops with exit 14 at once: `zero_yield` on page 1,
+  `end_unknown` after it. A sample or named pages read past such a page, as
+  before. run.v1 `list.status` gains
   `end`, `end_unknown` and the reserved walk values `short_census`,
   `ceiling_hit`, `anchored`, `clamped`. See "Positive END" in
   [docs/sync.md](docs/sync.md).
