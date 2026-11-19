@@ -678,7 +678,7 @@ def ads_outcome(planned: set[tuple], pol: policy.SyncPolicy = policy.DEFAULT):
         job.doc["status"] = "stopped"
         return crawl.Stop(crawl.EXIT_PARSE, f"STOPPED: {a['parse_streak']} ad pages of {job.doc['source']} failed "
                           "to parse, across runs, with no ad parsed since (the ad parser is broken?); fix it, "
-                          f"then `{pipeline.consumer().cli} reparse` the saved pages")  # fmt: skip
+                          "then plan a new fetch-ads (this run is not resumed)")  # fmt: skip
 
     return check
 

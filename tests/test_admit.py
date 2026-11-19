@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from conftest import FIXTURES
 from example_site.source import ExampleSite
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from test_approvals import networked, operator_key  # noqa: F401 - fixtures
 from test_fresh_gate import card_obs
@@ -281,6 +281,7 @@ def correction_of(run_id, reconciled, at):
 
 @settings(max_examples=300, deadline=None)
 @given(st.lists(event_st, max_size=16), st.integers(0, 6), st.booleans())
+@example([(1, "seen", -1), (2, "seen", -1), (1, "gone_legacy", -12)], 2, True)  # an ambiguous url-only gone
 def test_property_the_gate_and_the_postcondition_agree(evs, budget, shared):
     """A false positive of the postcondition is terminal in a refresh, so: whatever the gate admits passes.
     The world mixes good and aborted crawls, OK fetches and reparses, weak and positive gones from two runs

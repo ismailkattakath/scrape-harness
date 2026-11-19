@@ -84,18 +84,14 @@ def test_the_digest_covers_the_rule_constants_in_code(monkeypatch, module, name,
 # The rule CODE (not its constants) is versioned by SyncPolicy.lanes, which the digest covers. This pins
 # that version to a fingerprint of the code: change any of these functions and this test fails until
 # `lanes` is bumped (a new key here), so a rule change can never ride under an old signature.
-RULE_CODE = [
-    ("plan", "fetch_reason"), ("plan", "eligible"), ("plan", "select_ads"), ("plan", "_equal"),
-    ("plan", "_largest_remainder"), ("plan", "stratified_sample"), ("plan", "sample_lanes"), ("plan", "admit"),
-    ("liveness", "good_crawl"), ("liveness", "_fold"), ("liveness", "build"), ("adkey", "event_key"),
-    ("adkey", "url_index"), ("breaker", "_threshold"), ("breaker", "weak"), ("breaker", "parse_streak"),
-    ("breaker", "Breaker"), ("cli", "fetch_pool"), ("cli", "never_opened"), ("cli", "_select"),
-]  # fmt: skip
-PINNED = {"select_ads.v2": "sha256:2068f7a7a2a0263d46a8d8833e5684a2a34c80064796273b57910f57b76f1942"}
+RULE_MODULES = ["plan", "liveness", "adkey", "breaker", "corrections"]  # whole modules: no helper is missed
+RULE_CODE = [("cli", "fetch_pool"), ("cli", "_passed_lists"), ("cli", "never_opened"), ("cli", "_select")]
+PINNED = {"select_ads.v2": "sha256:b5e7ab40c7293e656dc33ac25dc84f1df01c667001d538b0d40618d654564299"}
 
 
 def rule_fingerprint() -> str:
-    """sha256 over the AST of RULE_CODE, docstrings stripped: formatting and comments never move it."""
+    """sha256 over the AST of RULE_MODULES and RULE_CODE, docstrings stripped: formatting and comments never
+    move it."""
     import ast
     import hashlib
     import importlib
@@ -103,8 +99,9 @@ def rule_fingerprint() -> str:
     import textwrap
 
     h = hashlib.sha256()
-    for module, name in RULE_CODE:
-        obj = getattr(importlib.import_module(f"scrape_harness.{module}"), name)
+    for module, name in [(m, None) for m in RULE_MODULES] + RULE_CODE:
+        obj = importlib.import_module(f"scrape_harness.{module}")
+        obj = getattr(obj, name) if name else obj
         tree = ast.parse(textwrap.dedent(inspect.getsource(obj)))
         for node in ast.walk(tree):
             body = getattr(node, "body", None)
