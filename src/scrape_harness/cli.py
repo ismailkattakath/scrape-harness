@@ -647,9 +647,11 @@ def selection_words(ads: dict) -> str:
 
 
 def ads_outcome(planned: set[tuple]):
-    """fetch-ads' postcheck: the run's ads{} outcome (ad GETs sent, listings written, gone events)."""
+    """fetch-ads' postcheck: the run's ads{} outcome (ad GETs sent, listings written, gone events). A run
+    that wrote no listing while at least one ad page failed to parse is a zero yield: exit 14, terminal.
+    All gone (real removals) or a small run is not: B is a ceiling."""
 
-    def check(job: crawl.Run, stop: crawl.Stop | None) -> None:
+    def check(job: crawl.Run, stop: crawl.Stop | None) -> crawl.Stop | None:
         a = job.doc.setdefault("ads", {})
         rid, since = job.doc["run_id"], job.doc["created_at"]
         a["ad_gets"] = int(job.doc.get("requests", {}).get("ad_pages", 0))
@@ -662,8 +664,16 @@ def ads_outcome(planned: set[tuple]):
                 and (r["source"]["site"], r["ad_id"]) in planned
             }
         )
-        a["gone"] = sum(1 for e in store.read("events") if e.get("run_id") == rid and e["kind"] == "gone")
-        return None
+        kinds = [e["kind"] for e in store.read("events") if e.get("run_id") == rid]
+        a["gone"] = kinds.count("gone")
+        failed = kinds.count("parse_failed")
+        if stop is not None or a["ok"] or not failed:
+            return None  # a run's own stop stands; a small run, or one whose ads are all gone, is normal
+        # Every answered ad page that was not gone failed to parse, below the breaker's floor (the breaker
+        # cannot trip under `breaker_floor` failures): a zero yield, terminal like crawl-lists' (exit 14).
+        job.doc["status"] = "stopped"
+        return crawl.Stop(crawl.EXIT_PARSE, f"STOPPED: zero yield: {a['ad_gets']} ad page requests, {failed} "
+                          "could not be parsed and no listing was written (the ad parser drifted?)")  # fmt: skip
 
     return check
 

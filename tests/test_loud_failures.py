@@ -276,3 +276,39 @@ def test_a_list_page_handed_back_twice_is_still_read_before_the_walk_completes(d
     crawl.run(job, ExampleSite(), lambda m, r: read.append(r.url), FAST, None, opts(FIXTURES))
     assert read == [P1] and served(LIST) == [P1, P1, P1]  # page 1 was read in the end: no hole
     assert crawl.Run.load(job.doc["run_id"]).doc["status"] == "completed"
+
+
+# ── fetch-ads: every answered ad page failed to parse is a zero yield, loud ─────────────────────────
+def test_fetch_ads_where_every_ad_fails_to_parse_is_zero_yield_exit_14(data_dir, monkeypatch):
+    """Below the breaker's floor (3 failures < 5) nothing trips, so the postcheck must ring: no listing was
+    written and at least one answered page could not be parsed. Terminal, a parse incident opens."""
+    _crawl_and_plan(FIXTURES)
+
+    def parse_ad(self, html, *, url, **kw):
+        raise AttributeError("'NoneType' object has no attribute 'text'")
+
+    monkeypatch.setattr(ExampleSite, "parse_ad", parse_ad)
+    assert main(["fetch-ads", *fix(FIXTURES)]) == crawl.EXIT_PARSE
+    fetch = run_docs(data_dir)[-1]
+    assert fetch["requests"]["ad_pages"] == 3 and sorted(served(LIST)) == sorted([AD1, AD2, AD3])  # no retry
+    assert fetch["ads"]["ok"] == 0 and fetch["ads"]["ad_gets"] == 3
+    assert fetch["status"] == "stopped" and fetch["stop"]["code"] == crawl.EXIT_PARSE
+    assert "zero yield" in fetch["stop"]["reason"]
+    assert "breaker" not in fetch or not fetch["breaker"].get("tripped")  # the breaker did not do it
+    assert [i["kind"] for i in incidents.open_ones()] == ["parse"]
+    assert not [e for e in store.read("events") if e["run_id"] == fetch["run_id"] and e["kind"] == "completed"]
+
+
+def test_fetch_ads_where_one_ad_parses_is_not_zero_yield(data_dir, monkeypatch):
+    _crawl_and_plan(FIXTURES)
+    real = ExampleSite.parse_ad
+
+    def parse_ad(self, html, *, url, **kw):
+        if url == AD1:
+            return real(self, html, url=url, **kw)
+        raise AttributeError("synthetic parser break")
+
+    monkeypatch.setattr(ExampleSite, "parse_ad", parse_ad)
+    assert main(["fetch-ads", *fix(FIXTURES)]) == 0
+    fetch = run_docs(data_dir)[-1]
+    assert fetch["ads"]["ok"] == 1 and fetch["status"] == "completed"
