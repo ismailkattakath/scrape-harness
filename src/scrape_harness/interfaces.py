@@ -80,6 +80,9 @@ class Source(Protocol):
     # END, ADR-0017 A.1); a 404/410 or 200 list page carrying it, with 0 cards at the URL asked for, ends the
     # list. Without it a past-end page is never an END (fail closed). Prove it on a saved past-end page.
     # end_selectors: tuple[str, ...]
+    # optional: the HTTP statuses the site's END answers with (its measured past-end page, e.g. (404, 410)); when
+    # set, a "no results" page with any other status (a 200 empty filter result, a soft block) is never an END.
+    # end_statuses: tuple[int, ...]
     # optional: the list's order. "bump_desc" (newest bump first) lets a frontier walk stop early at a confirmed
     # anchor (ADR-0017 A.2); any other value, and the default "unordered", walks to a positive END or the signed
     # ceiling (it costs list GETs, never views). Declare bump_desc only behind an offline evidence test.

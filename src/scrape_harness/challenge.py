@@ -149,15 +149,20 @@ def gone_reason(
 GONE = ("http_404", "http_410")
 
 
-def end_reason(r: FetchResult, reason: str | None, end_selectors=(), ignore=()) -> str | None:
+def end_reason(r: FetchResult, reason: str | None, end_selectors=(), ignore=(), end_statuses=()) -> str | None:
     """`end_marker` when a LIST page carries the source's own "no results" template (end_selectors) on a page
-    with no challenge sign, else None. The twin of gone_reason: it admits a clean page (None), one that merely
-    lacks the list expectation (EXPECTED_MISSING) and a 404/410 (GONE), because detect() returns http_4xx
-    before the expectation check, so a past-end 404 with the marker would otherwise be a challenge stop.
-    Every challenge sign (a block status, a login redirect, cf-mitigated, a challenge title, corroborated
-    markers or captcha) returns from detect() before GONE, so it is never an end. The marker only nominates
-    the page: the list handler accepts END (0 cards, no redirect) or refuses it (ADR-0017 A.1)."""
-    if not end_selectors or not (reason is None or reason in EXPECTED_MISSING or reason in GONE):
+    with no challenge sign and no wall, else None. It admits a clean page (None), one that is merely not the list
+    (`unexpected_page`) and a 404/410 (GONE), because detect() returns http_4xx before the expectation check, so
+    a past-end 404 with the marker would otherwise be a challenge stop. Every challenge sign (a block status, a
+    login redirect, cf-mitigated, a challenge title, corroborated markers or captcha) returns from detect()
+    before GONE, so it is never an end; nor is a sign-in wall or a consent gate, which stay stops (exit 5) even
+    when their template carries a generic "no results" component. A source that declares `end_statuses` (its
+    measured past-end answer, e.g. (404, 410)) ends a list only on those statuses: a 200 "no results" page (a
+    filter's empty result, a soft block) is then never its END. The marker only nominates the page: the list
+    handler accepts END (0 cards, no redirect) or refuses it (ADR-0017 A.1)."""
+    if not end_selectors or not (reason is None or reason == "unexpected_page" or reason in GONE):
+        return None
+    if end_statuses and r.status not in end_statuses:
         return None
     doc = _doc(r, ignore)
     return "end_marker" if any(doc.select_one(s) for s in end_selectors) else None

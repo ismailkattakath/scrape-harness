@@ -60,9 +60,54 @@ def events(kind):
 
 
 # ── the pure rule ──────────────────────────────────────────────────────────────────────────────────────
-@pytest.mark.parametrize("reason", [None, *challenge.EXPECTED_MISSING, *challenge.GONE])
+@pytest.mark.parametrize("reason", [None, "unexpected_page", *challenge.GONE])
 def test_end_reason_admits_the_marker_on_a_page_with_no_challenge_sign(reason):
     assert challenge.end_reason(res(), reason, (MARK,)) == "end_marker"
+
+
+@pytest.mark.parametrize("reason", ["signin_wall", "consent_gate"])
+def test_end_reason_never_admits_a_wall(reason):
+    """A sign-in wall or a consent gate is a stop (exit 5), whatever generic "no results" component its
+    template also carries: a wall must never end a census early as a good crawl."""
+    assert challenge.end_reason(res(), reason, (MARK,)) is None
+
+
+def test_a_signin_wall_carrying_the_marker_stops_the_walk(data_dir, tmp_path, marker):
+    wall = ("<!doctype html><html><head><title>Sign in | Example</title></head><body><h1>Sign in</h1>"
+            '<form><input type="password"><input type="submit" value="Sign in"></form>'
+            '<div id="no-results">No widgets match</div></body></html>')  # fmt: skip
+    d = fixtures(tmp_path, {P3: "wall.html"}, [("wall.html", wall)])
+    assert crawl_lists(d, "--pages", "1,3") == crawl.EXIT_CHALLENGE
+    (doc,) = run_docs(data_dir)
+    assert doc["list"].get("status") != "end" and events("challenge")
+
+
+@pytest.mark.parametrize("status, nominated", [(404, True), (410, True), (200, False)])
+def test_declared_end_statuses_are_the_only_statuses_that_nominate(status, nominated):
+    """A source that declares end_statuses (its measured past-end answer, e.g. 404/410) ends a list only on
+    them: a 200 "no results" page (a filter's empty result, a soft block) is never its END."""
+    reason = None if status == 200 else f"http_{status}"
+    got = challenge.end_reason(res(status), reason, (MARK,), end_statuses=(404, 410))
+    assert got == ("end_marker" if nominated else None)
+
+
+def test_without_end_statuses_any_admitted_status_nominates():
+    assert challenge.end_reason(res(200), None, (MARK,)) == "end_marker"  # the default: as before
+
+
+def test_a_200_no_results_page_mid_list_is_not_end_when_the_source_declares_its_end_statuses(
+    data_dir, tmp_path, marker, monkeypatch
+):
+    from test_list_walk import P, site
+
+    monkeypatch.setattr(ExampleSite, "end_statuses", (404, 410), raising=False)
+    d = site(tmp_path, [[2000001], [2000002], [2000003]])
+    urls = json.loads((d / "urls.json").read_text())
+    (d / "urls.json").write_text(json.dumps(urls | {P(2): "soft.html"}))
+    (d / "soft.html").write_text(EMPTY_WITH_MARK)
+    assert crawl_lists(d, "--mode", "walk", "--max-pages", "10") == crawl.EXIT_PARSE
+    (doc,) = run_docs(data_dir)
+    assert doc["list"]["status"] == "end_unknown" and "end_read_page" not in doc["list"]
 
 
 @pytest.mark.parametrize(

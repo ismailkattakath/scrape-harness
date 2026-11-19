@@ -28,7 +28,9 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   carrying the site's "no results" marker (on a clean page or a 404/410, never
   on a challenge sign) to the list handler. It is END only with 0 parsed cards
   at the URL asked for: `list.status: end`, `list.end_read_page`,
-  `list.end_method`. A 0-card page with no END stops with exit 14 at once:
+  `list.end_method`. A sign-in wall or consent gate is never nominated (it
+  stays a stop), and optional `Source.end_statuses` (e.g. `(404, 410)`)
+  limits END to the site's measured past-end statuses. A 0-card page with no END stops with exit 14 at once:
   `zero_yield` on page 1, `end_unknown` after it. run.v1 `list.status` gains
   `end`, `end_unknown` and the reserved walk values `short_census`,
   `ceiling_hit`, `anchored`, `clamped`. See "Positive END" in

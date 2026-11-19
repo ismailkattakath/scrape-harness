@@ -797,6 +797,7 @@ async def _crawl(
     ignore = tuple(getattr(source, "ignore_selectors", ()))
     gone_selectors = tuple(getattr(source, "gone_selectors", ()))  # the source's "ad no longer active" page
     end_selectors = tuple(getattr(source, "end_selectors", ()))  # its "no results" list page (an END)
+    end_statuses = tuple(getattr(source, "end_statuses", ()))  # the statuses its END answers with (all: unset)
     blocks = variants.get(job.doc["variant"]).blocks
     block = browser.block_extensions() if blocks else ()
     site_host = (urlsplit(source.robots_url).hostname or "").removeprefix("www.")
@@ -1059,7 +1060,7 @@ async def _crawl(
         # --snapshot) hand it to the handler alike. Only crawl-lists' handler decides an END, so only its runs
         # (`walk`) nominate one: any other list reader (ab) stops on such a page as before.
         nominee = (
-            challenge.end_reason(res, reason, end_selectors, ignore) if kind == "list" and walk else None
+            challenge.end_reason(res, reason, end_selectors, ignore, end_statuses) if kind == "list" and walk else None
         )
         end = nominee == "end_marker"
         if kind == "list" and ctx.request.user_data.get("snapshot"):

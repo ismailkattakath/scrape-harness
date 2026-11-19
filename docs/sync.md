@@ -316,10 +316,18 @@ broken card selector also gives 0 cards.
   cannot prove the status or the missing redirect.
 - **The nominee.** `challenge.end_reason(res, reason, end_selectors, ignore)`
   is pure. It returns `end_marker` only when a selector matches AND
-  `challenge.detect` found no challenge sign: a clean page, a page that only
-  lacks the list expectation, or a 404/410. Every challenge sign (403/429/503,
-  cf-mitigated, a challenge title, a corroborated marker or captcha, a login
-  redirect) returns first, so it still stops the run with exit 5.
+  `challenge.detect` found no challenge sign and no wall: a clean page, an
+  `unexpected_page` (merely not the list), or a 404/410. Every challenge sign
+  (403/429/503, cf-mitigated, a challenge title, a corroborated marker or
+  captcha, a login redirect) returns first, so it still stops the run with
+  exit 5; so do a sign-in wall and a consent gate, even when their template
+  carries a generic "no results" component.
+- **The END statuses.** Optional `Source.end_statuses` names the statuses the
+  site's END answers with (its measured past-end page, e.g. `(404, 410)`).
+  When set, a "no results" page with any other status (a 200 empty filter
+  result, a soft block) is never nominated: in a walk it is a 0-card page
+  with no END, `end_unknown`, exit 14. Unset, every admitted status
+  nominates, as before.
 - **The seam.** In crawl-lists runs, a nominated list page skips the challenge
   stop and goes to the list handler, with and without `--snapshot`.
 - **The handler decides, END first.** END needs the marker, **0 parsed cards**
