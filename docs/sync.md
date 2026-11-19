@@ -367,7 +367,7 @@ is prefetched.
 |---|---|---|
 | A positive END (the end marker, as above) | `list.status: end`, `end_method: end_marker`, `end_page` = the last page, exact | 0 |
 | A clamp: more than half of a page's ids were already seen earlier in this walk | `end`, `end_method: clamped`, `end_page` = the last non-repeated page; the repeated page's cards are not kept | 0 |
-| The signed ceiling, `--max-pages` list GETs (the END page included) | `list.status: ceiling_hit` | 0 |
+| The signed ceiling, `--max-pages` list GETs (the END page included) | `list.status: ceiling_hit`, plus `list.gap` (`since_ref` null) | 0 |
 | An END with `end_page` below the signed `--min-pages` | `short_census`; terminal, never resumed | 14 |
 | A 0-card page with no END, a bare 404, a failed or robots-blocked page | as for every list read (above) | 14, 5 or 13 |
 
@@ -457,11 +457,15 @@ where today's list runs into what the reference crawl already read.
   followed by today's new bumps, so the confirmation fails; a rotated block is
   followed by new ids, or by old content out of order (the inversion check);
   an ad pushed across a page boundary was seen earlier in this walk.
-- **The GAP.** A frontier that hits its ceiling records `list.gap{after_page,
+- **The GAP.** A walk that hits its ceiling records `list.gap{after_page,
   since_ref, opened_by}`: the bumps past its ceiling, back to its reference
-  (`since_ref` null in a bootstrap), were never read. A later frontier that
-  anchors on it carries the same `gap` on; a census as the reference closes it
-  (it has no gap). A frontier that reads to its END records none. The crawl
+  (`since_ref` null in a bootstrap, and for a census, which has no reference),
+  were never read. A frontier whose reference still has an open GAP keeps that
+  GAP's `since_ref` and `opened_by` (the oldest unread origin) and the smaller
+  `after_page`, so a chain of ceiling-bound frontiers never shortens it. A
+  later frontier that anchors on it carries the same `gap` on; only a census
+  that read to its END closes it (as the reference, it has no gap). A walk
+  that reads to its END records none. The crawl
   prints a `GAP:` line, the run card names an open GAP of the reference, and
   the refresh summary prints `GAP after page N (since reference R)`.
 - **Rows** carry `sample_weight` null and `page_count` null: a frontier is
@@ -495,11 +499,6 @@ where today's list runs into what the reference crawl already read.
   appears in the end summary and on the fetch-ads step's own run card.
 - **The stride-k depth walk is not built yet.** The census and frontier walks
   are (above). The page-count path stays, but it now fails loudly.
-- **A census at its ceiling records no GAP.** Only a frontier writes
-  `list.gap`. A standalone census that hits its ceiling is still a good crawl
-  and may be a later frontier's reference, and that frontier then reports no
-  open GAP. Inside a refresh this cannot happen, because a census at its
-  ceiling fails the step (exit 14).
 - **The end-marker precondition checks a declaration, not a test.** `refresh`
   refuses a walk step whose source declares no `end_selectors`. It cannot see
   whether the plug-in tests them on a saved past-end page.

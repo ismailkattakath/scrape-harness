@@ -157,6 +157,53 @@ def test_ceiling_gap_recorded(data_dir, tmp_path, marker, ordered, capsys):
     assert third["list"]["status"] == "anchored" and "gap" not in third["list"]
 
 
+def test_chained_ceiling_frontiers_keep_the_oldest_gap(data_dir, tmp_path, marker, ordered, capsys):
+    """Two ceiling-bound frontiers in a row: the second's reference is the first (the latest valid crawl), whose
+    GAP is still open. The bumps past the ceiling are unread since the CENSUS, not since the first frontier, so
+    the GAP keeps its oldest since_ref (and its opener) and never shortens with each ceiling."""
+    ref = census(tmp_path)
+    many = [ids(5000001), ids(5000007), ids(5000013), ids(5000019)] + REF
+    assert frontier(site(tmp_path / "f1", many), "--max-pages", "3") == 0
+    first = latest_doc()
+    assert first["list"]["gap"] == {"after_page": 3, "since_ref": ref, "opened_by": first["run_id"]}
+    FixtureHttpClient.log.clear()
+    more = [ids(6000001), ids(6000007), ids(6000013), ids(6000019)] + many
+    capsys.readouterr()
+    assert frontier(site(tmp_path / "f2", more), "--max-pages", "3") == 0
+    second = latest_doc()
+    assert second["list"]["status"] == "ceiling_hit" and second["list"]["ref_crawl_id"] == first["run_id"]
+    assert second["list"]["gap"] == first["list"]["gap"]
+    assert f"GAP: after page 3 (since reference {ref})" in capsys.readouterr().err
+
+
+def test_a_bootstrap_gap_survives_a_second_ceiling(data_dir, tmp_path, marker, ordered):
+    """The bootstrap GAP (since_ref null: nothing was ever read past the ceiling) stays null through the next
+    ceiling-bound frontier, instead of becoming "since the bootstrap"."""
+    many = [ids(5000001), ids(5000007), ids(5000013), ids(5000019)] + REF
+    assert frontier(site(tmp_path / "f1", many), "--max-pages", "3") == 0
+    first = latest_doc()
+    FixtureHttpClient.log.clear()
+    assert frontier(site(tmp_path / "f2", [ids(6000001), ids(6000007), ids(6000013)] + many), "--max-pages", "2") == 0
+    gap = latest_doc()["list"]["gap"]
+    # the smaller ceiling widens the GAP: pages after 2 are now unread, still since no reference
+    assert gap == {"after_page": 2, "since_ref": None, "opened_by": first["run_id"]}
+
+
+def test_a_census_at_its_ceiling_records_a_gap_that_a_frontier_carries_on(data_dir, tmp_path, marker, ordered):
+    """A census that hits its ceiling is a good crawl and a valid reference, so it records its own GAP (the
+    pages past its ceiling were not read); a frontier anchored on it carries that GAP on, never `gap: None`."""
+    assert crawl_lists(site(tmp_path / "ref", REF), "--mode", "walk", "--max-pages", "2") == 0
+    stamp()
+    cen = latest_doc()
+    assert cen["list"]["status"] == "ceiling_hit"
+    assert cen["list"]["gap"] == {"after_page": 2, "since_ref": None, "opened_by": cen["run_id"]}
+    FixtureHttpClient.log.clear()
+    assert frontier(site(tmp_path / "today", TODAY), "--max-pages", "20") == 0
+    lst = latest_doc()["list"]
+    assert lst["status"] == "anchored" and lst["ref_crawl_id"] == cen["run_id"]
+    assert lst["gap"] == cen["list"]["gap"]
+
+
 def test_steady_state_anchors_deeper_than_the_reference_read(data_dir, tmp_path, marker, ordered, capsys):
     """An ANCHORED reference read only 3 pages; the next day brings 2 pages of new bumps, so the boundary
     sits deeper than the reference's own last page. The candidate is judged by its place in the REFERENCE

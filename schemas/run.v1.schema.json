@@ -482,7 +482,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["after_page", "since_ref", "opened_by"],
-          "description": "A frontier's open GAP: the walk opened_by hit its ceiling at after_page, so the bumps between it and since_ref (null: no reference before it) were never read. A later frontier anchored on it carries it on; a census of the list (as the reference) closes it.",
+          "description": "A walk's open GAP: the walk opened_by hit its ceiling at after_page, so the bumps between it and since_ref (null: no reference before it, or a census) were never read. A frontier on a reference with an open GAP keeps that GAP's since_ref and opened_by (the smaller after_page); a later frontier anchored on it carries it on; only a census that read to its END (as the reference) closes it.",
           "properties": {
             "after_page": {"type": "integer", "minimum": 1},
             "since_ref": {"type": ["string", "null"]},

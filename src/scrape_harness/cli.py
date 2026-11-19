@@ -256,9 +256,7 @@ def list_outcome(job: crawl.Run, stop: crawl.Stop | None) -> crawl.Stop | None:
             return _gap_line(job)
         if lst.get("settled", 0) >= lst.get("ceiling", 0):
             lst["status"] = "ceiling_hit"  # read to its signed ceiling: good, and the list goes on past it
-            if lst["mode"] == "frontier":  # the bumps past the ceiling are unread until a later census
-                lst["gap"] = {"after_page": lst["ceiling"], "since_ref": lst.get("ref_crawl_id"),
-                              "opened_by": job.doc["run_id"]}  # fmt: skip
+            lst["gap"] = _ceiling_gap(job, lst)  # the pages past the ceiling are unread until a census ENDs
             return _gap_line(job)
         # drained with neither an END nor the ceiling: the walk lost its next page; never an `ok` census
         lst["status"] = "end_unknown"
@@ -267,6 +265,20 @@ def list_outcome(job: crawl.Run, stop: crawl.Stop | None) -> crawl.Stop | None:
                           "pages with neither a positive END nor its ceiling")  # fmt: skip
     lst["status"] = "end" if end is not None else "ok"
     return None
+
+
+def _ceiling_gap(job: crawl.Run, lst: dict) -> dict:
+    """The GAP a walk at its ceiling leaves open. A census has no reference: nothing past its ceiling was read by
+    it (since_ref null). A frontier whose reference still has an open GAP keeps that GAP's origin (since_ref and
+    opened_by: the list past it has been unread since then, not since this reference) and the smaller
+    after_page; only a reference with no GAP (a census that ENDED, an anchor on one) starts a new one from it."""
+    new = {"after_page": lst["ceiling"], "since_ref": None, "opened_by": job.doc["run_id"]}
+    if lst["mode"] != "frontier":
+        return new
+    ref = next((d for d in crawl.run_docs() if d["run_id"] == lst.get("ref_crawl_id")), None)
+    if old := ((ref or {}).get("list") or {}).get("gap"):
+        return old | {"after_page": min(old["after_page"], lst["ceiling"])}
+    return new | {"since_ref": lst.get("ref_crawl_id")}
 
 
 def _gap_line(job: crawl.Run) -> None:

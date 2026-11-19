@@ -52,8 +52,10 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   consecutive cards holding consecutive places in the reference's parsed order;
   one more page confirms it (90% reference ids below it, at most 5% inversions).
   `list.status: anchored`, `list.anchor`, `list.ref_crawl_id`, `list.order`,
-  `list.k`; a ceiling records `list.gap`, carried by later anchored frontiers
-  until a census is the reference, and shown as GAP. `SyncPolicy` gains
+  `list.k`; a walk at its ceiling (a census too) records `list.gap`, whose
+  oldest origin a later ceiling-bound frontier keeps; later anchored frontiers
+  carry it on until a census that read to its END is the reference; it is
+  shown as GAP. `SyncPolicy` gains
   `frontier_k`, `confirm_share` and `confirm_inversions`; the lanes version is
   `select_ads.v4`. `mode`, `k` and the policy digest are signed only when set.
   Walks record `list.subcategory` and `list.region`. See "The frontier walk" in
