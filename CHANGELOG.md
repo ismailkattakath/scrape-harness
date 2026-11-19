@@ -49,6 +49,17 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
 - fetch-ads plans only from the gate. Its plan signs `as_of` (the plan time)
   and `policy_digest`, so plan hashes now depend on the plan time.
 - `crawl resume` of a fetch-ads run now makes a new, filtered, superseding run.
+  It is refused only when a successor took over the pending scope; a
+  `--supersede --failed` successor no longer blocks it.
+- A write the data folder refuses after an ad page answered (exit 4) leaves
+  that ad done in the queue, so no resume GETs it again. A refused gone event
+  is guarded the same way and still counts toward the breaker.
+- A crawl's sightings count only when the crawl is `completed` with
+  `list.status` ok. Rows kept before a stop (`parse_drift`, `failed`,
+  `blocked`, any stopped run) no longer buy ad GETs.
+- The postcondition joins a gone to its ad by the ledger's own rule
+  (`adkey`). A legacy url-only gone whose url names two ads no longer
+  refuses the whole plan.
 - `cli.fetch_plan` was removed. Use `cli.fetch_pool` and the selection.
 - Gone events carry `ad_id`. A consumer's golden digests need re-recording
   when it bumps its harness pin.
