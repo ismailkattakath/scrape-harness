@@ -27,12 +27,22 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   pure `challenge.end_reason`, and a seam in the crawl that hands a list page
   carrying the site's "no results" marker (on a clean page or a 404/410, never
   on a challenge sign) to the list handler. It is END only with 0 parsed cards
-  at the URL asked for: `list.status: end`, `list.end_page`,
+  at the URL asked for: `list.status: end`, `list.end_read_page`,
   `list.end_method`. A 0-card page with no END stops with exit 14 at once:
   `zero_yield` on page 1, `end_unknown` after it. run.v1 `list.status` gains
   `end`, `end_unknown` and the reserved walk values `short_census`,
   `ceiling_hit`, `anchored`, `clamped`. See "Positive END" in
   [docs/sync.md](docs/sync.md).
+- `crawl-lists --mode walk` (ADR-0017 §A, the census walk): pages 1, 2, 3, ...,
+  each next page enqueued only after the current one is handled, with no
+  page-count discovery. It stops at a positive END (`end_page` exact), a clamp
+  (`end_method: clamped`), or its signed ceiling of `--max-pages` list GETs
+  (`ceiling_hit`). `--min-pages N` (signed): an END before N pages is
+  `short_census`, exit 14. `mode` and `min_pages` are signed only when set,
+  and a walk step's bounds count `max_pages` list GETs (no `1 +`). A resume
+  continues from the next unread page within what the ceiling leaves.
+  run.v1 `list` gains `end_read_page`, `mode`, `stride`, `ceiling`,
+  `min_pages`, `pages_read` and `settled`. Stride k is refused (deferred).
 - `ListPage.skipped` (optional): cards the parser could not read.
 - Exit 14 (`crawl.EXIT_PARSE`): a parse or yield stop, terminal, with a
   `parse` incident (and `gone_storm` for a breaker trip).
@@ -64,6 +74,11 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
 
 - A list handler error, a missing page count (before: exit 4) and a list read
   that yields no observation now end with exit 14.
+- A good crawl (`liveness.good_crawl`, and a refresh's list postcondition) is
+  now a completed run with `list.status` `ok`, `end`, `ceiling_hit` or
+  `anchored`; a refresh list step that positively ENDED on page 1 (an empty
+  subcategory) passes with 0 observations. `SyncPolicy.lanes` is
+  `select_ads.v3`, so the policy digest changes.
 - A list page that fails after its retries, or that robots.txt blocks, now ends
   the crawl with exit 13, not `completed`.
 - An ad page that fails to parse records one `parse_failed` event, and the ad

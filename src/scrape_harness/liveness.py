@@ -47,11 +47,14 @@ class Rules:
 
     readmit_after: timedelta = timedelta(hours=24)
     # A GOOD crawl (ADR-0017 §B.2): corrected status in good_status AND list.status in good_list_status. An
-    # allowlist: every stop value (zero_yield, parse_drift, failed, blocked) and every unfinished run (stopped,
-    # running, aborted) is out, so rows persisted before a Stop never count as sightings (§B.1). Slice 2's
-    # walk modes add their passing values (anchored, end, ceiling_hit) here.
+    # allowlist: every stop value (zero_yield, parse_drift, failed, blocked, end_unknown, short_census) and
+    # every unfinished run (stopped, running, aborted) is out, so rows persisted before a Stop never count as
+    # sightings (§B.1); so are the evidence runs (past_end, redirected). The passing values: ok (a sample or
+    # named pages read), end (a positive END: the end marker, or a walk's clamp), ceiling_hit (a walk read to
+    # its signed ceiling: every page it read is a true sighting, the GAP lies past it) and anchored (the
+    # frontier walk, reserved). `clamped` is reserved and stays out (a clamp records end, end_method clamped).
     good_status: frozenset = frozenset({"completed"})
-    good_list_status: frozenset = frozenset({"ok"})
+    good_list_status: frozenset = frozenset({"ok", "end", "ceiling_hit", "anchored"})
 
 
 DEFAULT = Rules()

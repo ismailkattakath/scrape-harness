@@ -38,6 +38,8 @@ the gate, with 0 GETs. It opens a `parse` incident. A breaker trip opens a
 | Page 1 named no page count | 14 | `list.status: parse_drift` |
 | Page 1 gave 0 cards with no positive END | 14 | `list.status: zero_yield` |
 | A later page gave 0 cards with no positive END, or carried the end marker but is not an END | 14 | `list.status: end_unknown` |
+| A census walk ENDED before its signed `--min-pages` | 14 | `list.status: short_census` |
+| A census walk drained with neither an END nor its ceiling | 14 | `list.status: end_unknown` |
 | List pages answered, but 0 observations were written | 14 | `list.status: zero_yield` |
 | A list page failed after its retries | 13 (resumable) | `list.status: failed` |
 | A list page was disallowed by robots.txt | 13 | `list.status: blocked` |
@@ -63,9 +65,11 @@ ad's history, in time order, into one state:
 | `held` | a `parse_failed` after the latest live sighting, with no listing since | a listing written after it (an OK fetch or a reparse) |
 
 A crawl is **good** only when its corrected status is `completed` and its
-`list.status` is `ok` (`liveness.good_crawl`, an allowlist). So the rows a
+`list.status` is `ok`, `end`, `ceiling_hit` or `anchored` (`liveness.good_crawl`,
+an allowlist; `anchored` is reserved for the frontier walk). So the rows a
 crawl kept before a stop never count as sightings: not after `parse_drift`,
-`failed`, `zero_yield` or `blocked`, and not from a run that is `stopped`,
+`failed`, `zero_yield`, `end_unknown`, `short_census` or `blocked`, not from an
+evidence run (`past_end`, `redirected`), and not from a run that is `stopped`,
 `running` or `aborted`. Two legacy cases cannot be judged and count as good:
 a crawl_id with no run doc, and a completed run from before `list.status`.
 A refresh's own list steps get no such benefit of the doubt. Run corrections
@@ -198,8 +202,10 @@ step after it.
 - A **crawl-lists step passes only** when all of these hold:
   - it exited 0;
   - the run doc it names is a completed crawl-lists run of this refresh;
-  - its `list.status` is `ok`;
-  - `observations_written` is above 0.
+  - its `list.status` is good: `ok`, `end`, `ceiling_hit` or `anchored`
+    (the same set as `liveness.good_crawl`);
+  - `observations_written` is above 0, or page 1 itself positively ENDED
+    (`end_page: 0`, an empty subcategory).
 - Anything else is recorded as **exit 14**. That is terminal: the approval is
   spent, and fetch-ads never plans from that list read.
 - The refresh's end summary shows:
@@ -293,8 +299,8 @@ broken card selector also gives 0 cards.
 
 | The page | Result |
 |---|---|
-| Marker, 0 cards, no redirect (200, 404 or 410) | **END**: `list.end_page`, `list.end_method: end_marker`; the run ends `list.status: end` |
-| Page 1 is that END | an empty subcategory: `end`, 0 observations, exit 0 |
+| Marker, 0 cards, no redirect (200, 404 or 410) | **END**: `list.end_read_page`, `list.end_method: end_marker`; the run ends `list.status: end` |
+| Page 1 is that END | an empty subcategory: `end`, `end_page: 0`, 0 observations, exit 0 |
 | Marker and cards on a 200 page | a normal page: rows kept |
 | Marker on a 404/410 or `unexpected_page` that is not an END (cards, or a redirect) | `end_unknown`, exit 14; none of its cards are kept |
 | Marker, 0 cards, at another URL (200) | `end_unknown` (page 1: `zero_yield`), exit 14 |
@@ -302,13 +308,67 @@ broken card selector also gives 0 cards.
 | 404/410 without the marker | as before: exit 5 without `--snapshot`, `past_end` evidence with it |
 
 **With `--snapshot`** the END page keeps its own outcome (`past_end` for a
-404/410) and is also the run's `end_page`. A run with an END and no bare
+404/410) and is also the run's `end_read_page`. A run with an END and no bare
 past-end or redirected page records `end`; one bare past-end page still makes
 it an evidence run (`past_end`).
 
-**Not yet a good crawl.** `liveness.good_crawl` and the refresh postcondition
-still accept only `ok`. So an `end` run is fail-closed, like `past_end`: its
-sightings feed no gate until the walk modes widen the good set.
+**Two page numbers.** `end_read_page` is the page whose read ENDED the list.
+`end_page` is the **last page of the list** (its page count), the page before
+it. It is recorded only where it is exact: in a census walk (below), which
+reads every page from 1, or when page 1 itself ENDED (`end_page: 0`). A run
+of named pages (`--pages 1,3,400`) records only `end_read_page`: page 399 may
+or may not hold cards.
+
+An `end` run is a **good crawl** (see the liveness ledger).
+
+## The census walk
+
+```
+<cli> crawl-lists --subcategory X --mode walk --max-pages 40 --min-pages 18 --plan
+```
+
+`--mode walk` (ADR-0017 §A, stride 1) reads pages 1, 2, 3, .... The list
+handler enqueues the **next page only after it handles the current one**: no
+page count is read (a windowed pager links only a few pages ahead), and no page
+is prefetched.
+
+| It stops at | Recorded | Exit |
+|---|---|---|
+| A positive END (the end marker, as above) | `list.status: end`, `end_method: end_marker`, `end_page` = the last page, exact | 0 |
+| A clamp: more than half of a page's ids were already seen earlier in this walk | `end`, `end_method: clamped`, `end_page` = the last non-repeated page; the repeated page's cards are not kept | 0 |
+| The signed ceiling, `--max-pages` list GETs (the END page included) | `list.status: ceiling_hit` | 0 |
+| An END with `end_page` below the signed `--min-pages` | `short_census`; terminal, never resumed | 14 |
+| A 0-card page with no END, a bare 404, a failed or robots-blocked page | as for every list read (above) | 14, 5 or 13 |
+
+- **Signed.** `mode` and `min_pages` join the plan (`run_plan`) and a
+  refresh's signed list set (`approvals.LIST_KEYS_IF_SET`) only when set, so a
+  plan without them hashes as before. A refresh's bounds count exactly
+  `max_pages` list GETs for a walk step (no `1 +` discovery allowance), and the
+  operator's text says "a census walk".
+- **Refused with it:** `--stride` other than 1 (the stride-k depth walk, H4, is
+  deferred), `--pages`, `--page-count`, `--start`, `--seed`, and a
+  `--min-pages` above `--max-pages`. `--min-pages` without `--mode walk` is
+  refused.
+- **Rows.** Each kept card has `sample_weight` 1 and `page_count` null: the
+  run doc's `end_page` is the count.
+- **State on the run doc**, saved after every page: `list{mode, stride,
+  ceiling, min_pages, pages_read, settled}`. `settled` counts handled AND
+  failed list GETs, the way crawlee's own cap counts them; the walk enqueues
+  the next page only while `settled < ceiling`.
+- **Resume** continues from the next unread page: the page that stopped the
+  run (a challenge hands it back; a failed page is queued again). It is bounded
+  by what the signed ceiling leaves (`ceiling - settled`), never by the resume's
+  own `--max-pages`, and its plan binds `mode`, `ceiling` and `settled`. A walk
+  that already settled its ceiling is refused (exit 13). The clamp guard's
+  memory is this crawl's own rows in DATA, so a resume still sees earlier ids.
+- **Good crawls.** `end` and `ceiling_hit` are good: every page read is a true
+  sighting (a `ceiling_hit` leaves the rest of the list unread, the GAP of
+  ADR-0017 A.3, recorded by the frontier step). `short_census` and
+  `end_unknown` are terminal stops. A clamp is an END by the walk's own
+  evidence (A.1 names it an `end_method`), so it records `end`; the reserved
+  `clamped` status is never written and stays out of the good set.
+- **The lanes version is now `select_ads.v3`**, because the good-crawl set
+  changed: the policy digest moves with it.
 
 ## Known gaps in slice 1
 
@@ -325,6 +385,8 @@ sightings feed no gate until the walk modes widen the good set.
 - **The refresh's plan card cannot show the ad selection.** Inside a refresh,
   freshness depends on the list steps that have not run yet. The selection
   appears in the end summary and on the fetch-ads step's own run card.
-- **List walk modes are not built yet.** These are census to a positive end,
-  frontier walk to a confirmed anchor, and gallop. The page-count path stays,
-  but it now fails loudly.
+- **The frontier walk and the stride-k depth walk are not built yet.** The
+  census walk is (above). The page-count path stays, but it now fails loudly.
+- **A census walk has no parser-drift ratio guard yet** (ADR-0017 A.4,
+  skipped/cards > 0.5). A broken card selector still stops it at once: 0 cards
+  with no END is exit 14.

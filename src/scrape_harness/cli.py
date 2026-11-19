@@ -74,6 +74,50 @@ def _polite(args: argparse.Namespace) -> crawl.Politeness:
 
 
 def list_handler(job: crawl.Run, source, max_pages: int):
+    seen: set[str] | None = None  # a walk's ad ids so far, for the clamp guard: this crawl's own rows
+
+    def walk_seen() -> set[str]:
+        nonlocal seen
+        if seen is None:  # once per attempt, from DATA: a resume sees the ids of the pages read before it
+            rid = job.doc["run_id"]
+            seen = {o["ad_id"] for o in store.read("observations") if o.get("crawl_id") == rid}
+        return seen
+
+    def ended(lst: dict, m: dict, method: str) -> None:
+        """Record an END read on page m["page"]: end_read_page (the lowest), and in a walk end_page = the page
+        before it (exact: pages were read contiguously from 1). Elsewhere end_page is exact only when page 1
+        ENDED (0, an empty subcategory)."""
+        p = m["page"]
+        if lst.get("end_read_page") is not None and p >= lst["end_read_page"]:
+            return
+        lst["end_read_page"], lst["end_method"] = p, method
+        if m.get("mode") == "walk" or p == 1:
+            lst["end_page"] = p - 1
+
+    def walked(lst: dict, m: dict) -> list[dict]:
+        """A walk page is handled: count it, save the walk's state, and enqueue the NEXT page only while the
+        signed ceiling (every list GET, the END page included) leaves room. Never two pages ahead."""
+        lst["pages_read"] = lst.get("pages_read", 0) + 1
+        lst["settled"] = lst.get("settled", 0) + 1
+        job.save()  # the walk's state after every page: a resume continues from it
+        if lst.get("end_read_page") is not None:
+            if lst["end_page"] < (lst.get("min_pages") or 0):
+                lst["status"] = "short_census"
+                raise crawl.Stop(crawl.EXIT_PARSE, f"STOPPED: short_census: the list ENDED after {lst['end_page']} "
+                                 f"pages ({lst['end_method']}), fewer than the signed --min-pages "
+                                 f"{lst['min_pages']}")  # fmt: skip
+            return []
+        if lst["settled"] >= lst["ceiling"]:
+            return []
+        p = m["page"] + 1
+        return [
+            {
+                "url": source.list_url(m["subcategory"], m["region"], p),
+                "kind": "list",
+                "meta": {**m, "page": p},
+            }
+        ]
+
     def handle(m: dict, res: FetchResult) -> list[dict]:
         # this page's END nomination (crawl's seam), taken out so no page planned from `m` can inherit it
         m = dict(m)
@@ -87,10 +131,10 @@ def list_handler(job: crawl.Run, source, max_pages: int):
         # A positive END (ADR-0017 A.1), decided FIRST: before the page-count check (a past-end template has no
         # pager) and before any drift guard (a past-end page may still render promoted slots the parser skips).
         lst = job.doc.setdefault("list", {})
+        walk = m.get("mode") == "walk"
         if marked and not lp.observations and not crawl.redirected(res):
-            if lst.get("end_page") is None or m["page"] < lst["end_page"]:
-                lst["end_page"], lst["end_method"] = m["page"], "end_marker"
-            return []
+            ended(lst, m, "end_marker")
+            return walked(lst, m) if walk else []
         if marked and reason:  # it would have stopped the run: none of it is kept
             lst["status"] = "end_unknown"
             raise crawl.Stop(crawl.EXIT_PARSE, f"STOPPED: end_unknown: list page {m['page']} carries the end "
@@ -100,6 +144,16 @@ def list_handler(job: crawl.Run, source, max_pages: int):
             lst["status"] = "zero_yield" if m["page"] == 1 else "end_unknown"
             raise crawl.Stop(crawl.EXIT_PARSE, f"STOPPED: {lst['status']}: list page {m['page']} gave 0 cards "
                              "and no end marker")  # fmt: skip
+        # a census walk: no pager is read (a windowed pager gives no count), weight 1, one page ahead
+        if walk:
+            ids = [o["ad_id"] for o in lp.observations]
+            known = walk_seen()
+            if 2 * sum(1 for i in ids if i in known) > len(ids):  # the clamp guard: repeats, not new content
+                ended(lst, m, "clamped")  # its cards are earlier pages' cards again: none is kept
+                return walked(lst, m)
+            keep(lp.observations, None, 1)
+            known.update(ids)
+            return walked(lst, m)
         new: list[dict] = []
         weight = m.get("sample_weight")
         page_count = m.get("page_count") or lp.page_count
@@ -152,7 +206,7 @@ def list_outcome(job: crawl.Run, stop: crawl.Stop | None) -> crawl.Stop | None:
     if stop is not None:
         return None
     snap = lst.get("snapshot") or {}
-    end = lst.get("end_page")
+    end = lst.get("end_read_page")
     # an END page is saved as past_end (it answered 404/410) and was handed to the parser; a bare past-end page
     # (no end marker) is evidence only
     bare = [p for p in snap.get("past_end", ()) if p != end]
@@ -165,9 +219,18 @@ def list_outcome(job: crawl.Run, stop: crawl.Stop | None) -> crawl.Stop | None:
         job.doc["status"] = "stopped"
         return crawl.Stop(crawl.EXIT_PARSE, f"STOPPED: zero yield: {job.doc['requests']['list_pages']} list "
                           "page requests and no observation written (no cards, or the parser drifted)")  # fmt: skip
-    if unlisted:  # an evidence run: completed, never a good crawl (liveness.good_crawl allows only ok)
+    if unlisted:  # an evidence run: completed, never a good crawl (liveness.Rules.good_list_status)
         lst["status"] = "past_end" if bare else "redirected"
         return None
+    if lst.get("mode") == "walk" and end is None:
+        if lst.get("settled", 0) >= lst.get("ceiling", 0):
+            lst["status"] = "ceiling_hit"  # read to its signed ceiling: good, and the list goes on past it
+            return None
+        # drained with neither an END nor the ceiling: the walk lost its next page; never an `ok` census
+        lst["status"] = "end_unknown"
+        job.doc["status"] = "stopped"
+        return crawl.Stop(crawl.EXIT_PARSE, f"STOPPED: end_unknown: the walk ended after {lst.get('pages_read', 0)} "
+                          "pages with neither a positive END nor its ceiling")  # fmt: skip
     lst["status"] = "end" if end is not None else "ok"
     return None
 
@@ -360,6 +423,8 @@ def _planned_from(plan_doc: dict) -> dict:
         return {kind: plan_doc["pending"], "robots": 1}
     if cmd == "crawl-lists" and plan_doc.get("pages"):
         return {"list": len(plan_doc["pages"]), "robots": 1}
+    if cmd == "crawl-lists" and _walk(plan_doc):  # at most: the walk stops at its END
+        return {"list": plan_doc["max_pages"], "robots": 1}
     if cmd == "crawl-lists" and plan_doc.get("page_count"):
         _, pages = plan.systematic_pages(
             plan_doc["page_count"], plan_doc["stride"], plan_doc.get("start"), plan_doc.get("seed")
@@ -373,7 +438,7 @@ def _step_doc(plan_doc: dict) -> dict:
     if plan_doc["command"] == "crawl-lists":
         lp = (
             _planned_from(plan_doc).get("list", 0)
-            if plan_doc.get("page_count") or plan_doc.get("pages")
+            if plan_doc.get("page_count") or plan_doc.get("pages") or _walk(plan_doc)
             else 1 + plan_doc["max_pages"]  # page 1, then at most max_pages of the sample it plans
         )
         return plan_doc | {"list_pages": lp, "ad_requests": 0, "fetch_reasons": []}
@@ -460,11 +525,36 @@ def _check_pages(args: argparse.Namespace) -> None:
         raise SystemExit(f"--pages names {len(args.pages)} pages, more than --max-pages {args.max_pages}")
 
 
+def _walk(x) -> bool:
+    """A census walk (ADR-0017 A): a plan doc, a signed list set or parsed arguments with mode walk."""
+    return (x.get("mode") if isinstance(x, dict) else getattr(x, "mode", None)) == "walk"
+
+
+def _check_walk(args: argparse.Namespace) -> None:
+    """--mode walk reads 1, 2, 3, ... to a positive END: the sample's and the named pages' options are refused
+    with it (never silently ignored). Stride k (the H4 depth walk) is not built yet."""
+    if getattr(args, "min_pages", None) is not None and not _walk(args):
+        raise SystemExit("--min-pages guards a census: it needs --mode walk")
+    if not _walk(args):
+        return
+    if args.stride != 1:
+        raise SystemExit(f"--mode walk reads every page (stride 1): the stride-{args.stride} depth walk (H4) is "
+                         "deferred; use --page-count with --stride for a sample")  # fmt: skip
+    clash = [f for f, on in (("--pages", bool(args.pages)), ("--page-count", args.page_count is not None),
+             ("--start", args.start is not None), ("--seed", args.seed is not None)) if on]  # fmt: skip
+    if clash:
+        raise SystemExit(f"--mode walk reads from page 1 to its END: it cannot take {', '.join(clash)}")
+    if args.max_pages < 1 or (args.min_pages is not None and not 1 <= args.min_pages <= args.max_pages):
+        raise SystemExit(f"--mode walk needs 1 <= --min-pages <= --max-pages ({args.min_pages} and "
+                         f"{args.max_pages}): a census that can never pass is refused")  # fmt: skip
+
+
 def cmd_crawl_lists(args: argparse.Namespace) -> int:
     source = load("sources", args.source)
     variant = _variant(args, source, "list")
     _polite(args)
     _check_pages(args)
+    _check_walk(args)
     _refresh_step(args)
     if _networked(args, [variant]):
         _deterministic(args)
@@ -485,6 +575,8 @@ def cmd_crawl_lists(args: argparse.Namespace) -> int:
             # signed only when set, so every plan without them hashes as before
             **({"pages": args.pages} if args.pages else {}),
             **({"snapshot": True} if args.snapshot else {}),
+            **({"mode": args.mode} if args.mode else {}),
+            **({"min_pages": args.min_pages} if args.min_pages is not None else {}),
         ),
         [variant],
     )
@@ -498,8 +590,21 @@ def cmd_crawl_lists(args: argparse.Namespace) -> int:
         "start": args.start,
         "seed": args.seed,
         **({"snapshot": True} if args.snapshot else {}),  # in each request: a resume keeps saving
+        **({"mode": "walk"} if _walk(args) else {}),
     }
-    if args.pages:  # exactly these pages, in order: no discovery, no sample weight
+    job = crawl.Run.new("crawl-lists", variant, source.site)
+    if _walk(args):  # the walk's signed state, on the run doc from the start (a resume reads it back)
+        job.doc["list"] = {"mode": "walk", "stride": 1, "ceiling": args.max_pages, "pages_read": 0, "settled": 0,
+                           **({"min_pages": args.min_pages} if args.min_pages is not None else {})}  # fmt: skip
+        # page 1 only: the handler enqueues each next page after it handles the current one
+        reqs = [
+            {
+                "url": source.list_url(args.subcategory, args.region, 1),
+                "kind": "list",
+                "meta": {**m, "page": 1},
+            }
+        ]
+    elif args.pages:  # exactly these pages, in order: no discovery, no sample weight
         reqs = [
             {
                 "url": source.list_url(args.subcategory, args.region, p),
@@ -533,7 +638,6 @@ def cmd_crawl_lists(args: argparse.Namespace) -> int:
                 "meta": {**m, "page": 1, "discover": True},
             }
         ]
-    job = crawl.Run.new("crawl-lists", variant, source.site)
     if approval:
         job.doc["approval_ref"] = approval
     how = (
@@ -544,16 +648,25 @@ def cmd_crawl_lists(args: argparse.Namespace) -> int:
         if args.pages
         else f"{len(reqs)} list pages"
         if args.page_count
+        else f"pages 1, 2, 3, ... to a positive END, at most {args.max_pages}"
+        if _walk(args)
         else "page 1, then the sample it plans"
     )
     if args.pages:
         how = "named pages" + (", snapshots saved" if args.snapshot else "")
+    if _walk(args):
+        how = "census walk" + (f", at least {args.min_pages} pages" if args.min_pages else "")
     card = {
         "command": "crawl-lists",
         "purpose": f"read {what} of {args.subcategory} ({how})",
-        "planned": {"list": len(reqs), "robots": 1},
-        # crawlee's ceiling: the planned pages, or page 1 plus the most its sample may add
-        "ceiling": len(reqs) if args.page_count or args.pages else 1 + args.max_pages,
+        "planned": {"list": args.max_pages if _walk(args) else len(reqs), "robots": 1},
+        # crawlee's ceiling: the planned pages, a walk's signed ceiling (every list GET, the END page included),
+        # or page 1 plus the most its sample may add
+        "ceiling": len(reqs)
+        if args.page_count or args.pages
+        else args.max_pages
+        if _walk(args)
+        else 1 + args.max_pages,  # fmt: skip
     }
     return _execute(args, job, source, list_handler(job, source, args.max_pages), reqs, card, list_outcome)
 
@@ -1057,7 +1170,7 @@ def cmd_crawl_correct(args: argparse.Namespace) -> int:
 def cmd_crawl_resume(args: argparse.Namespace) -> int:
     job = crawl.Run.load(args.run_id)
     stop, lst = job.doc.get("stop") or {}, job.doc.get("list") or {}
-    terminal = ("zero_yield", "parse_drift", "end_unknown")
+    terminal = ("zero_yield", "parse_drift", "end_unknown", "short_census")
     if stop.get("code") == crawl.EXIT_PARSE or lst.get("status") in terminal:
         # its stopping request is DONE: a resume would drain to `completed` and pass for a reference crawl
         print(f"refusing: run {job.doc['run_id']} stopped terminally (exit {crawl.EXIT_PARSE}: "
@@ -1065,6 +1178,10 @@ def cmd_crawl_resume(args: argparse.Namespace) -> int:
         return crawl.EXIT_PARSE
     if job.doc["command"] == "fetch-ads":
         return _resume_fetch_ads(args, job)
+    if _walk(lst) and lst["settled"] >= lst["ceiling"]:  # a failed last GET spent it: nothing may be sent
+        print(f"refusing: walk {job.doc['run_id']} settled its signed ceiling of {lst['ceiling']} list GETs; "
+              "plan a new crawl instead", file=sys.stderr)  # fmt: skip
+        return crawl.EXIT_INCOMPLETE
     source = load("sources", job.doc["source"])
     # the plan signs the proxy the run will actually use: its own (a resume keeps it), not a new choice
     args.kept_proxy = (job.doc.get("proxy") or {}).get("url")
@@ -1080,6 +1197,8 @@ def cmd_crawl_resume(args: argparse.Namespace) -> int:
             max_pages=args.max_pages,
             resumes=job.doc["command"],
             pending=crawl.pending(job),  # what is left to send: the card shows it, the approval binds it
+            # a walk's signed ceiling and what it already settled: the approval binds what is left of it
+            **({k: lst[k] for k in ("mode", "ceiling", "settled")} if _walk(lst) else {}),
         ),
         [job.doc["variant"]],
     )
@@ -1102,8 +1221,11 @@ def cmd_crawl_resume(args: argparse.Namespace) -> int:
         card={
             "command": "crawl resume",
             "purpose": f"resume {job.doc['command']} run {job.doc['run_id']}",
-            # what is pending (a list crawl's page 1 may still plan up to max_pages more); unknown: none
-            "ceiling": None
+            # a walk: what its signed ceiling leaves; else what is pending (a list crawl's page 1 may still plan
+            # up to max_pages more); unknown: none
+            "ceiling": max(lst["ceiling"] - lst["settled"], 0)
+            if _walk(lst)
+            else None
             if (left := crawl.pending(job)) is None
             else left + (args.max_pages if job.doc["command"] == "crawl-lists" else 0),
         },
@@ -1674,7 +1796,24 @@ def parser() -> argparse.ArgumentParser:
     c.add_argument("--stride", type=int, default=1, help="every k-th page (1 = census)")
     c.add_argument("--start", type=int, help="first page in [1, stride]; random from --seed when omitted")
     c.add_argument("--seed", type=int)
-    c.add_argument("--max-pages", type=int, default=60)
+    c.add_argument(
+        "--max-pages",
+        type=int,
+        default=60,
+        help="the most list pages to read; with --mode walk, every list GET the walk may send (the END page "
+        "included)",
+    )
+    c.add_argument(
+        "--mode",
+        choices=["walk"],
+        help="walk: read pages 1, 2, 3, ..., the next only after the current one is handled, to a positive END "
+        "or --max-pages (no page-count discovery); stride 1 only (a census)",
+    )
+    c.add_argument(
+        "--min-pages",
+        type=int,
+        help="with --mode walk: an END before this many pages is short_census (exit 14)",
+    )
     c.add_argument(
         "--pages",
         type=page_list,

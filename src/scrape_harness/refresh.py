@@ -17,7 +17,8 @@ and stops (exit 3, resumable) unless the count is 0 or the operator passed `--<s
 it then runs with `--max-requests N` if it has that option. A paid_exempt step runs as declared.
 
 A crawl-lists step PASSES only on exit 0 AND its run doc (named by the run_id it prints) being a completed
-crawl-lists run of THIS refresh with list.status ok AND observations_written > 0 (list_postcondition).
+crawl-lists run of THIS refresh with a good list.status (liveness.Rules: ok, end, ceiling_hit, anchored) AND
+observations_written > 0, or a positive END on page 1 (an empty subcategory) (list_postcondition).
 Anything else that exited 0 is recorded as exit 14, so the strict doit chain stops there and fetch-ads never
 plans from a list read that cannot be trusted. The end summary shows each crawl-lists step's list{} and each
 fetch-ads step's ads{} selection (eligible, lanes, excluded), read from DATA at print time.
@@ -30,7 +31,7 @@ mismatch, a data folder refusal (4), an egress refusal (8), politeness (7), an u
 incomplete crawl (13), a step refused as unapproved (10), e.g. a fetch-ads policy digest that no longer
 matches the signed one, which no resume can pass) is RESUMABLE: the next `<cli> refresh --approve-network`
 continues the same run id inside the same approval and TTL, skipping the steps it already completed.
-A site step's resume consumes its CEILING again (crawl-lists: 1 + max_pages; fetch-ads: its ads): only a
+A site step's resume consumes its CEILING again (crawl-lists: 1 + max_pages, or max_pages for a walk; fetch-ads: its ads): only a
 refusal before any site request (6/7/8) refunds the first use. So a crash or 12/13 resumes only while the
 bounds leave room for the ceiling twice; otherwise the resume is a bound breach and spends the approval.
 Size --max-ad-requests (and the crawl-lists step's --max-pages) with that headroom.
@@ -64,7 +65,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import approvals, pipeline, store
+from . import approvals, liveness, pipeline, store
 
 RUN_ID = re.compile(r"^refresh-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}$")
 DEFAULT_TTL = "12h"
@@ -223,9 +224,12 @@ def build_bounds(ttl: str = DEFAULT_TTL, max_ad_requests: int | None = None) -> 
             if cli._networked(ns, [v]):  # noqa: SLF001
                 cli._deterministic(ns)  # noqa: SLF001 - the signed sample is the one crawled
             cli._check_pages(ns)  # noqa: SLF001
+            cli._check_walk(ns)  # noqa: SLF001
             lists.append(approvals.list_args(ns))  # one signed set per step
             if ns.pages:
                 max_lists += len(ns.pages)
+            elif cli._walk(ns):  # noqa: SLF001 - every list GET of the walk, the END page included (R30)
+                max_lists += ns.max_pages
             elif ns.page_count:
                 _, pages = plan.systematic_pages(ns.page_count, ns.stride, ns.start, ns.seed)
                 max_lists += min(len(pages), ns.max_pages)
@@ -393,8 +397,9 @@ def _run_doc(objs: list[dict]) -> dict | None:
 
 def list_postcondition(run_id: str, objs: list[dict]) -> str | None:
     """Why a crawl-lists step that exited 0 still FAILS this refresh, or None. It passes only when its run doc
-    is a completed crawl-lists run of THIS refresh with list.status ok and at least one observation written;
-    anything else (an older step, a doc that names no list outcome) fails closed."""
+    is a completed crawl-lists run of THIS refresh with a good list.status (ok, end, ceiling_hit, anchored:
+    liveness.Rules) and at least one observation written, or a positive END on page 1 (an empty
+    subcategory, end_page 0); anything else (an older step, a doc that names no list outcome) fails closed."""
     rid = objs[-1].get("run_id") if objs else None
     if not rid:
         return "the step printed no run_id"
@@ -409,9 +414,10 @@ def list_postcondition(run_id: str, objs: list[dict]) -> str | None:
     if doc.get("status") != "completed":
         return f"{rid} has status {doc.get('status')}"
     lst = doc.get("list") or {}
-    if lst.get("status") != "ok":
+    if lst.get("status") not in liveness.DEFAULT.good_list_status:  # the ONE good set (liveness.Rules)
         return f"{rid} has list.status {lst.get('status')}"
-    if not (lst.get("observations_written") or 0) > 0:
+    empty = lst.get("status") == "end" and lst.get("end_page") == 0  # page 1 positively ENDED: no cards
+    if not (lst.get("observations_written") or 0) > 0 and not empty:
         return f"{rid} has 0 observations written"
     return None
 

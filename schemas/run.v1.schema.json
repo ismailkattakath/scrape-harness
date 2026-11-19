@@ -424,7 +424,7 @@
     "list": {
       "type": "object",
       "additionalProperties": false,
-      "description": "crawl-lists: what the list walk yielded. `status` other than ok is never a good crawl and never a reference crawl (the walk modes widen this set, ADR-0017); the stop values (zero_yield, failed, blocked, parse_drift, end_unknown, short_census) are terminal. Absent on runs before the field.",
+      "description": "crawl-lists: what the list walk yielded. Only a `status` of ok, end, ceiling_hit or anchored is a good crawl (liveness.Rules, ADR-0017 B.2);the stop values (zero_yield, failed, blocked, parse_drift, end_unknown, short_census) are terminal. Absent on runs before the field.",
       "properties": {
         "status": {
           "enum": [
@@ -442,17 +442,31 @@
             "anchored",
             "clamped"
           ],
-          "description": "ok: pages parsed with cards; zero_yield: page 1 gave 0 cards with no positive END; failed: a handler error; blocked: a challenge or refusal stopped it; parse_drift: too many cards skipped by the parser; past_end / redirected (an evidence run, --snapshot only): the run completed, but a list page answered 404/410 without the end marker, or ended at another URL, so its sightings are not trusted; end: a list page positively ENDED the list (end_page); end_unknown: a page after page 1 gave 0 cards with no positive END, or carried the end marker on a page that is not an END (exit 14). Reserved for the walk modes (ADR-0017 A): short_census, ceiling_hit, anchored, clamped."
+          "description": "ok: pages parsed with cards; zero_yield: page 1 gave 0 cards with no positive END; failed: a handler error; blocked: a challenge or refusal stopped it; parse_drift: too many cards skipped by the parser; past_end / redirected (an evidence run, --snapshot only): the run completed, but a list page answered 404/410 without the end marker, or ended at another URL, so its sightings are not trusted; end: the list positively ENDED (end_read_page; end_page in a walk); end_unknown: a page after page 1 gave 0 cards with no positive END, or carried the end marker on a page that is not an END, or a walk drained with neither an END nor its ceiling (exit 14); short_census (a walk): the list ENDED before min_pages (exit 14); ceiling_hit (a walk): the walk read its signed ceiling of pages before any END. Good crawls: ok, end, ceiling_hit, anchored (liveness.Rules). Reserved for the frontier walk: anchored; clamped is reserved (a clamp is an END, end_method clamped)."
         },
         "end_page": {
           "type": "integer",
+          "minimum": 0,
+          "description": "The LAST page of the list (its page count), exact: the page before end_read_page. Set where it is exact: in a walk (pages read contiguously from page 1), or when page 1 itself ENDED (0, an empty subcategory)."
+        },
+        "end_read_page": {
+          "type": "integer",
           "minimum": 1,
-          "description": "The lowest list page that positively ENDED the list: the source's end marker, 0 parsed cards, served at the URL asked for."
+          "description": "The lowest page whose read ENDED the list: it carried the source's end marker with 0 parsed cards at the URL asked for, or (a walk's clamp) repeated earlier pages' ids."
         },
         "end_method": {
           "enum": ["end_marker", "clamped"],
-          "description": "How end_page was found: end_marker (the source's end_selectors). clamped is reserved for the stride-1 clamp guard."
+          "description": "How the END was found: end_marker (the source's end_selectors), or clamped (a walk: more than half of a page's ids already seen earlier in the walk; that page's cards are not kept)."
         },
+        "mode": {
+          "enum": ["walk"],
+          "description": "crawl-lists --mode: walk = pages 1, 2, 3, ..., the next one enqueued only after the current one is handled (ADR-0017 A). Absent: the page-count sample or named pages."
+        },
+        "stride": {"type": "integer", "minimum": 1, "description": "A walk's stride (1 = census; stride k is deferred)."},
+        "ceiling": {"type": "integer", "minimum": 1, "description": "A walk's signed ceiling: every list GET it may send (--max-pages), the END page included."},
+        "min_pages": {"type": "integer", "minimum": 1, "description": "A walk's signed --min-pages: an END with end_page below it is short_census."},
+        "pages_read": {"type": "integer", "minimum": 0, "description": "A walk's list pages handled, across every attempt (the END page included)."},
+        "settled": {"type": "integer", "minimum": 0, "description": "A walk's list GETs that settled, handled or failed, across every attempt: the ceiling counts these."},
         "snapshot": {
           "type": "object",
           "additionalProperties": false,

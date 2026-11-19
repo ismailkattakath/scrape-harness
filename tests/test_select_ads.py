@@ -86,7 +86,10 @@ def test_the_digest_covers_the_rule_constants_in_code(monkeypatch, module, name,
 # `lanes` is bumped (a new key here), so a rule change can never ride under an old signature.
 RULE_MODULES = ["plan", "liveness", "adkey", "breaker", "corrections"]  # whole modules: no helper is missed
 RULE_CODE = [("cli", "fetch_pool"), ("cli", "_passed_lists"), ("cli", "never_opened"), ("cli", "_select")]
-PINNED = {"select_ads.v2": "sha256:b5e7ab40c7293e656dc33ac25dc84f1df01c667001d538b0d40618d654564299"}
+PINNED = {
+    "select_ads.v2": "sha256:b5e7ab40c7293e656dc33ac25dc84f1df01c667001d538b0d40618d654564299",
+    "select_ads.v3": "sha256:ac6d4a246622c94d6de15ba0709f7b1af3534e1ff2ccab1329738daea1f3fa10",
+}
 
 
 def rule_fingerprint() -> str:

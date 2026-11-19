@@ -112,7 +112,11 @@ def test_past_end_404_with_marker_is_end(data_dir, tmp_path, marker, status):
     contracts.validate("run.v1", doc)
     assert doc["status"] == "completed" and doc["challenges"] == 0 and "stop" not in doc
     assert doc["list"]["status"] == "end"
-    assert doc["list"]["end_page"] == 400 and doc["list"]["end_method"] == "end_marker"
+    assert (
+        doc["list"]["end_read_page"] == 400
+        and "end_page" not in doc["list"]
+        and doc["list"]["end_method"] == "end_marker"
+    )
     assert not events("challenge") and not events("cooldown")
     assert {o["list"]["page"] for o in store.read("observations")} == {1, 3}
 
@@ -131,14 +135,22 @@ def test_past_end_promoted_slots_is_end(data_dir, tmp_path, marker, monkeypatch)
     d = fixtures(tmp_path, {P400: {"file": "end.html", "status": 404}}, [("end.html", PROMOTED_END)])
     assert crawl_lists(d, "--pages", "1,400") == 0
     (doc,) = run_docs(data_dir)
-    assert doc["list"]["status"] == "end" and doc["list"]["end_page"] == 400
+    assert (
+        doc["list"]["status"] == "end"
+        and doc["list"]["end_read_page"] == 400
+        and "end_page" not in doc["list"]
+    )
 
 
 def test_a_200_page_with_the_marker_and_no_cards_is_end(data_dir, tmp_path, marker):
     d = fixtures(tmp_path, {P400: "end.html"}, [("end.html", EMPTY_WITH_MARK)])
     assert crawl_lists(d, "--pages", "1,400") == 0
     (doc,) = run_docs(data_dir)
-    assert doc["list"]["status"] == "end" and doc["list"]["end_page"] == 400
+    assert (
+        doc["list"]["status"] == "end"
+        and doc["list"]["end_read_page"] == 400
+        and "end_page" not in doc["list"]
+    )
 
 
 def test_empty_subcategory_ok(data_dir, tmp_path, marker):
@@ -149,7 +161,9 @@ def test_empty_subcategory_ok(data_dir, tmp_path, marker):
     assert list_gets() == [P1]
     (doc,) = run_docs(data_dir)
     assert doc["status"] == "completed" and doc["list"]["status"] == "end"
-    assert doc["list"]["end_page"] == 1 and doc["list"]["observations_written"] == 0
+    # page 1 ENDED: the list has 0 pages (end_page, exact), read on page 1 (end_read_page)
+    assert doc["list"]["end_page"] == 0 and doc["list"]["end_read_page"] == 1
+    assert doc["list"]["observations_written"] == 0
 
 
 # ── what is NOT an END ─────────────────────────────────────────────────────────────────────────────────
@@ -159,7 +173,7 @@ def test_a_404_without_the_marker_is_still_a_challenge_stop(data_dir, tmp_path, 
     assert crawl_lists(d, "--pages", "1,400,3") == crawl.EXIT_CHALLENGE
     assert list_gets() == [P1, P400]
     (doc,) = run_docs(data_dir)
-    assert doc["challenges"] == 1 and "end_page" not in doc["list"]
+    assert doc["challenges"] == 1 and "end_read_page" not in doc["list"]
 
 
 def test_without_end_selectors_a_marked_404_is_still_a_challenge_stop(data_dir, tmp_path):
@@ -172,7 +186,7 @@ def test_a_200_page_with_the_marker_and_cards_is_a_normal_page(data_dir, tmp_pat
     d = fixtures(tmp_path, {P3: "p3.html"}, [("p3.html", P3_WITH_MARK)])
     assert crawl_lists(d, "--pages", "1,3") == 0
     (doc,) = run_docs(data_dir)
-    assert doc["list"]["status"] == "ok" and "end_page" not in doc["list"]
+    assert doc["list"]["status"] == "ok" and "end_read_page" not in doc["list"]
     assert {o["list"]["page"] for o in store.read("observations")} == {1, 3}
 
 
@@ -193,7 +207,7 @@ def test_redirect_to_page1_with_the_marker_is_not_end(data_dir, tmp_path, marker
     assert crawl_lists(d, "--pages", "1,400,3") == crawl.EXIT_PARSE
     assert list_gets() == [P1, P400]
     (doc,) = run_docs(data_dir)
-    assert doc["list"]["status"] == "end_unknown" and "end_page" not in doc["list"]
+    assert doc["list"]["status"] == "end_unknown" and "end_read_page" not in doc["list"]
     assert doc["stop"]["code"] == crawl.EXIT_PARSE
 
 
@@ -211,7 +225,7 @@ def test_end_marker_never_hides_challenge(data_dir, tmp_path, marker, entry):
     assert crawl_lists(d, "--pages", "1,400,3") == crawl.EXIT_CHALLENGE
     assert list_gets() == [P1, P400]
     (doc,) = run_docs(data_dir)
-    assert doc["challenges"] == 1 and "end_page" not in doc["list"]
+    assert doc["challenges"] == 1 and "end_read_page" not in doc["list"]
 
 
 def test_broken_selector_not_end(data_dir, tmp_path):
@@ -236,14 +250,19 @@ def test_a_marker_on_page_one_never_rides_on_to_the_pages_it_plans(data_dir, tmp
     assert crawl_lists(d, "--stride", "2", "--start", "1") == crawl.EXIT_PARSE
     assert list_gets() == [P1, P3]
     (doc,) = run_docs(data_dir)
-    assert doc["list"]["status"] == "end_unknown" and "end_page" not in doc["list"]
+    assert doc["list"]["status"] == "end_unknown" and "end_read_page" not in doc["list"]
 
 
 def test_a_200_page_without_the_list_expectation_but_with_the_marker_is_end(data_dir, tmp_path, marker):
     d = fixtures(tmp_path, {P400: "end.html"}, [("end.html", END_HTML)])  # no #results: unexpected_page
     assert crawl_lists(d, "--pages", "1,400") == 0
     (doc,) = run_docs(data_dir)
-    assert doc["challenges"] == 0 and doc["list"]["status"] == "end" and doc["list"]["end_page"] == 400
+    assert (
+        doc["challenges"] == 0
+        and doc["list"]["status"] == "end"
+        and doc["list"]["end_read_page"] == 400
+        and "end_page" not in doc["list"]
+    )
 
 
 # ── --snapshot agrees with the default path ────────────────────────────────────────────────────────────
@@ -255,7 +274,11 @@ def test_a_snapshot_run_reads_a_marked_404_as_end(data_dir, tmp_path, marker, st
     (doc,) = run_docs(data_dir)
     rid = doc["run_id"]
     contracts.validate("run.v1", doc)
-    assert doc["list"]["status"] == "end" and doc["list"]["end_page"] == 400
+    assert (
+        doc["list"]["status"] == "end"
+        and doc["list"]["end_read_page"] == 400
+        and "end_page" not in doc["list"]
+    )
     assert doc["list"]["snapshot"]["past_end"] == [400]  # the page's own outcome stays past_end
     s = sidecar(data_dir, rid, 400)
     assert s["outcome"] == "past_end" and s["parsed"] == 0 and s["reason"] == f"http_{status}"
@@ -267,7 +290,11 @@ def test_a_snapshot_run_records_a_200_end_without_the_list_expectation_as_listed
     d = fixtures(tmp_path, {P400: "end.html"}, [("end.html", END_HTML)])
     assert crawl_lists(d, "--pages", "1,400", "--snapshot") == 0
     (doc,) = run_docs(data_dir)
-    assert doc["list"]["status"] == "end" and doc["list"]["end_page"] == 400
+    assert (
+        doc["list"]["status"] == "end"
+        and doc["list"]["end_read_page"] == 400
+        and "end_page" not in doc["list"]
+    )
     s = sidecar(data_dir, doc["run_id"], 400)
     assert s["outcome"] == "listed" and s["reason"] == "unexpected_page" and s["parsed"] == 0
     assert body(data_dir, doc["run_id"], 400) == END_HTML
@@ -278,7 +305,7 @@ def test_a_snapshot_run_keeps_a_bare_404_as_evidence(data_dir, tmp_path, marker)
     d = fixtures(tmp_path, {P400: {"file": "bare.html", "status": 404}}, [("bare.html", bare)])
     assert crawl_lists(d, "--pages", "1,400", "--snapshot") == 0
     (doc,) = run_docs(data_dir)
-    assert doc["list"]["status"] == "past_end" and "end_page" not in doc["list"]
+    assert doc["list"]["status"] == "past_end" and "end_read_page" not in doc["list"]
 
 
 def test_a_snapshot_run_with_an_end_and_a_bare_404_is_evidence_not_an_end(data_dir, tmp_path, marker):
@@ -288,14 +315,18 @@ def test_a_snapshot_run_with_an_end_and_a_bare_404_is_evidence_not_an_end(data_d
                  [("end.html", END_HTML), ("bare.html", bare)])  # fmt: skip
     assert crawl_lists(d, "--pages", "1,400,401", "--snapshot") == 0
     (doc,) = run_docs(data_dir)
-    assert doc["list"]["status"] == "past_end" and doc["list"]["end_page"] == 400
+    assert (
+        doc["list"]["status"] == "past_end"
+        and doc["list"]["end_read_page"] == 400
+        and "end_page" not in doc["list"]
+    )
 
 
 def test_a_snapshot_run_with_a_redirected_marked_page_keeps_it_as_redirected(data_dir, tmp_path, marker):
     d = fixtures(tmp_path, {P400: {"file": "end.html", "final_url": P1}}, [("end.html", EMPTY_WITH_MARK)])
     assert crawl_lists(d, "--pages", "1,400", "--snapshot") == 0
     (doc,) = run_docs(data_dir)
-    assert doc["list"]["status"] == "redirected" and "end_page" not in doc["list"]
+    assert doc["list"]["status"] == "redirected" and "end_read_page" not in doc["list"]
 
 
 # ── contracts ──────────────────────────────────────────────────────────────────────────────────────────
@@ -313,8 +344,15 @@ def test_end_page_and_method_validate_and_are_closed():
     run = json.loads(
         (FIXTURES.parent.parent / "schemas" / "examples" / "run.list-stop.example.json").read_text()
     )
-    lst = {"status": "end", "observations_written": 3, "end_page": 4, "end_method": "end_marker"}
+    lst = {
+        "status": "end",
+        "observations_written": 3,
+        "end_page": 3,
+        "end_read_page": 4,
+        "end_method": "end_marker",
+    }
     contracts.validate("run.v1", run | {"list": lst})
-    for bad in ({"end_page": 0}, {"end_method": "guess"}):
+    contracts.validate("run.v1", run | {"list": lst | {"end_page": 0, "end_read_page": 1}})  # empty: 0 pages
+    for bad in ({"end_page": -1}, {"end_read_page": 0}, {"end_method": "guess"}):
         with pytest.raises(contracts.ContractError):
             contracts.validate("run.v1", run | {"list": lst | bad})

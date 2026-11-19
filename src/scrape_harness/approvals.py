@@ -718,8 +718,9 @@ def consume_standing(
 MAX_BOUNDED = timedelta(hours=24)
 BOUNDED_TIMES = ("not_before", "expires_at")
 LIST_KEYS = ("subcategory", "region", "page_count", "stride", "start", "seed", "max_pages")
-# Signed only when set (explicit pages, list snapshots): a set signed before they existed reads the same.
-LIST_KEYS_IF_SET = ("pages", "snapshot")
+# Signed only when set (explicit pages, list snapshots, the census walk and its --min-pages): a set signed
+# before they existed reads the same.
+LIST_KEYS_IF_SET = ("pages", "snapshot", "mode", "min_pages")
 
 
 def list_args(x) -> dict:
@@ -753,6 +754,11 @@ def _list_words(x: dict) -> str:
     )
     if x.get("pages"):
         how = "named pages"
+    if x.get("mode") == "walk":
+        how = "a census walk" + (
+            f", at least {x['min_pages']} pages or it stops" if x.get("min_pages") else ""
+        )
+        pages = f"pages 1, 2, 3, ... to a positive END, at most {x.get('max_pages')} list pages in all"
     snap = "; list snapshots saved, a 404/410 page recorded instead of stopping" if x.get("snapshot") else ""
     return f"{x.get('subcategory')} in {x.get('region')} ({how}; {pages}{snap})"
 

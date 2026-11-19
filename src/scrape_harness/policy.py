@@ -20,7 +20,8 @@ Fields (judgement values; changing one is an operator decision):
   lanes          the version of the selection rules in CODE (the gate, the lanes and their order, the ledger's
                  fold, the breaker, admission): a test pins it to a fingerprint of that code, so changing the
                  code fails the suite until this is bumped. v2: the good-crawl allowlist, the shared adkey join
-                 and the cross-run parse streak (2026-11-19).
+                 and the cross-run parse streak (2026-11-19). v3: the census walk's outcomes (end,
+                 ceiling_hit; anchored reserved) join the good-crawl allowlist.
 The digest also covers the rules' constants in code (`rule_constants`). A refresh's bounds sign only the
 digest, so a rule that is not in it could change between an approval and a resume unnoticed."""
 
@@ -45,7 +46,7 @@ class SyncPolicy:
     breaker_alpha: float = 1e-4
     breaker_floor: int = 5
     parse_streak: bool = True
-    lanes: str = "select_ads.v2"
+    lanes: str = "select_ads.v3"
 
     def __post_init__(self) -> None:
         if not 0 <= self.rho <= 1:
