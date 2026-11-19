@@ -569,7 +569,8 @@ class Selection:
 
 def _select(args: argparse.Namespace, pol: policy.SyncPolicy, recs: tuple, as_of: str) -> Selection:
     """Without --sample: plan.select_ads over the gated pool, budget --max-fetches. --sample (and --select
-    recruit, which needs it): the stratified sampler, over the SAME gated pool (recruit: its never-opened)."""
+    recruit, which needs it): the stratified sampler, over the SAME gated pool (recruit: its never-opened),
+    under the same lanes and HARD revisit cap with B = N (plan.sample_lanes)."""
     recruit = getattr(args, "select", "refetch") == "recruit"
     if recruit and not args.sample:
         raise SystemExit("--select recruit needs --sample N (a seeded, stratified one-off sample)")
@@ -584,7 +585,7 @@ def _select(args: argparse.Namespace, pol: policy.SyncPolicy, recs: tuple, as_of
     if recruit:
         cands = never_opened(cands)
     subs = args.subcategories.split(",") if args.subcategories else None
-    picks, strata = plan.stratified_sample(cands, args.sample, args.seed, args.allocation, subs)
+    picks, strata, lanes = plan.sample_lanes(cands, args.sample, args.seed, args.allocation, subs, pol)
     design = {
         "n": args.sample,
         "seed": args.seed,
@@ -594,7 +595,7 @@ def _select(args: argparse.Namespace, pol: policy.SyncPolicy, recs: tuple, as_of
         "strata": strata,
         **({"select": "recruit"} if recruit else {}),
     }
-    return Selection([(p["reason"], p["obs"]) for p in picks], design, picks, ads)
+    return Selection([(p["reason"], p["obs"]) for p in picks], design, picks, ads | {"lanes": lanes})
 
 
 def _fetch_plan_doc(args: argparse.Namespace, sel: Selection, source, variant: str) -> dict:
@@ -678,11 +679,14 @@ def ads_outcome(planned: set[tuple]):
     return check
 
 
-def _postcondition(planned: list[dict], recs: tuple, as_of: str, pol: policy.SyncPolicy) -> None:
+def _postcondition(
+    planned: list[dict], recs: tuple, as_of: str, pol: policy.SyncPolicy, budget: int | None = None
+) -> None:
     """plan.assert_admissible over the RAW records, before the gate: a plan naming an ad the records say must
-    not get a view is a selector bug, refused (exit 14) before any approval is spent or any GET is sent."""
+    not get a view, or more revisits than ceil(rho * budget), is a selector bug, refused (exit 14) before any
+    approval is spent or any GET is sent."""
     observations, listings, events, _ = recs
-    bad = plan.assert_admissible(planned, observations, listings, events, as_of, pol)
+    bad = plan.assert_admissible(planned, observations, listings, events, as_of, pol, budget)
     if bad:
         raise crawl.Stop(crawl.EXIT_PARSE, f"refusing: the plan names {len(bad)} ad(s) that must not get a view "
                          f"(postcondition): {'; '.join(bad[:5])}{' ...' if len(bad) > 5 else ''}")  # fmt: skip
@@ -826,7 +830,7 @@ def cmd_fetch_ads(args: argparse.Namespace) -> int:
     if stop := crawl.latch_stop(source.site):  # before the postcondition: a latched site is the louder fact
         raise stop
     _postcondition([{"site": o["site"], "ad_id": o["ad_id"], "url": o["ad_url"]} for _, o in todo], recs,
-                   sel.ads["as_of"], pol)  # fmt: skip
+                   sel.ads["as_of"], pol, args.sample or args.max_fetches)  # fmt: skip
     approval = gate(args, _fetch_plan_doc(args, sel, source, variant), [variant])
     if approval and "planned" in approval:
         return 0

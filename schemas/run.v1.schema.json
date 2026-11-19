@@ -715,6 +715,13 @@
             "number",
             "null"
           ]
+        },
+        "lane": {
+          "enum": [
+            "new",
+            "revisit"
+          ],
+          "description": "fetch-ads --sample over a pool with revisits: the lane this stratum belongs to (revisits are sampled first, capped at ceil(rho * n)). Absent when the pool had no revisit."
         }
       }
     }

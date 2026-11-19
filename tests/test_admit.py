@@ -269,4 +269,47 @@ def test_property_the_gate_and_the_postcondition_agree(evs, budget):
     pool, _, as_of = cli.fetch_pool(recs, POL, iso(BASE))
     todo, _ = plan.select_ads(pool, budget, POL)
     plans = [{"site": o["site"], "ad_id": o["ad_id"], "url": o["ad_url"]} for _, o in todo]
-    assert plan.assert_admissible(plans, observations, listings, events, as_of, POL) == []
+    assert plan.assert_admissible(plans, observations, listings, events, as_of, POL, budget) == []
+
+
+# ── the revisit lane's HARD cap holds on every path, and the postcondition checks it ────────────────
+
+
+def revisit_heavy(n_rev=30, n_new=3):
+    """n_rev ads fetched 10 days ago and sighted again now (stale_7d), n_new never fetched."""
+    seen = iso(BASE - timedelta(hours=1))
+    observations, listings = [], []
+    for i in range(n_rev + n_new):
+        o = card_obs(i, seen)
+        observations.append(o)
+        if i < n_rev:
+            listings.append(listing(o, iso(BASE - timedelta(days=10))))
+    return observations, listings
+
+
+def test_the_postcondition_refuses_more_revisits_than_ceil_rho_b():
+    observations, listings = revisit_heavy(n_rev=5, n_new=0)
+    plans = planned(*observations[:2])  # ceil(0.2 * 5) = 1 revisit allowed
+    bad = plan.assert_admissible(plans, observations, listings, [], iso(BASE), POL, 5)
+    assert bad == ["2 revisit(s) planned (ads with a listing), above the cap ceil(rho * B) = 1 for B = 5"]
+    assert plan.assert_admissible(plans[:1], observations, listings, [], iso(BASE), POL, 5) == []
+    assert plan.assert_admissible(plans, observations, listings, [], iso(BASE), POL) == []  # no B: not checked
+
+
+@pytest.mark.parametrize("n", [10, 33, 100])
+def test_sample_caps_the_revisit_lane_at_ceil_rho_n(data_dir, n):
+    import argparse
+
+    observations, listings = revisit_heavy()
+    recs = (observations, listings, [], [])
+    args = argparse.Namespace(select="refetch", sample=n, seed=1, refresh_run=None, subcategories=None,
+                              allocation="equal", stratify="depth", max_fetches=300)  # fmt: skip
+    sel = cli._select(args, POL, recs, iso(BASE))
+    reasons = [r for r, _ in sel.todo]
+    cap = POL.revisit_cap(n)
+    assert reasons.count("stale_7d") == min(30, cap)  # never more, whatever the new lane leaves unused
+    assert reasons.count("new") == min(3, n - reasons.count("stale_7d"))
+    assert sel.ads["lanes"] == {"new": reasons.count("new"), "revisit": reasons.count("stale_7d")}
+    assert sum(s["sampled"] for s in sel.design["strata"]) == len(sel.todo)
+    plans = [{"site": o["site"], "ad_id": o["ad_id"], "url": o["ad_url"]} for _, o in sel.todo]
+    assert plan.assert_admissible(plans, observations, listings, [], sel.ads["as_of"], POL, n) == []

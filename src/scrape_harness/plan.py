@@ -190,7 +190,9 @@ def admit(reqs: list[dict], cands: list[dict], since: str) -> tuple[list[dict], 
     return kept, dropped
 
 
-def assert_admissible(planned: list[dict], observations, listings, events, as_of: str, policy) -> list[str]:
+def assert_admissible(
+    planned: list[dict], observations, listings, events, as_of: str, policy, budget: int | None = None
+) -> list[str]:
     """The violations (empty: admissible) of a plan of ads {site, ad_id, url}, read from the RAW records.
 
     Deliberately NOT built on `eligible`, `select_ads` or `liveness`: it is the independent check that a selector
@@ -200,7 +202,10 @@ def assert_admissible(planned: list[dict], observations, listings, events, as_of
       - no listing fetched at or after its latest sighting (the gate plans a fetched ad only on a newer card);
       - no gone event (by ad_id, or by its url) at or after its latest OK fetch, unless a sighting re-admits it:
         one at least readmit_h after the earliest such gone and after the latest one. An operator `void` of the
-        gone's run (corrections.gone_effect) drops it."""
+        gone's run (corrections.gone_effect) drops it;
+      - with the plan's budget B: at most ceil(rho * B) revisits, an ad with ANY listing being a revisit (the
+        gate's `new` is exactly "no listing"). Without B (a superseding queue, whose own plan was capped) the
+        rule is not checked."""
     from . import corrections
 
     observations, listings, events = list(observations), list(listings), list(events)
@@ -256,6 +261,11 @@ def assert_admissible(planned: list[dict], observations, listings, events, as_of
         )
         if dead and not any(s >= dead[0] + readmit and s > dead[-1] for s in seen.get(k, [])):
             out.append(f"{name}: gone at {dead[-1]:%Y-%m-%dT%H:%M:%SZ} and never re-admitted")
+    if budget is not None:
+        revisits = len({(p["site"], p["ad_id"]) for p in planned} & fetched.keys())
+        if revisits > (cap := policy.revisit_cap(budget)):
+            out.append(f"{revisits} revisit(s) planned (ads with a listing), above the cap ceil(rho * B) = {cap} "
+                       f"for B = {budget}")  # fmt: skip
     return out
 
 
@@ -350,3 +360,28 @@ def stratified_sample(
                     {"reason": reason, "obs": o, "subcategory": sub, "decile": dec, "weight": weight}
                 )
     return picks, table
+
+
+def sample_lanes(
+    cands: list[tuple[str, dict]],
+    n: int,
+    seed: int,
+    allocation: str,
+    subcategories: list[str] | None,
+    policy,
+) -> tuple[list[dict], list[dict], dict[str, int]]:
+    """(picks, strata, lanes): `stratified_sample` under select_ads' lane rule, so --sample N keeps the HARD
+    revisit cap. The revisit lane (card_changed, stale_7d) is sampled first with n = ceil(rho * N), then the
+    new lane with what it left: unused revisit quota flows to new, unused new quota never to revisits. The lane
+    is one more stratification variable, so each pick's weight N_h / n_h stays exact within its lane (no
+    trim-and-refill, which would falsify it); strata rows then carry `lane`. A pool with no revisit is
+    `stratified_sample` unchanged, byte for byte."""
+    rev = [c for c in cands if c[0] in REVISIT]
+    if not rev:
+        picks, strata = stratified_sample(cands, n, seed, allocation, subcategories)
+        return picks, strata, {"new": len(picks), "revisit": 0}
+    new = [c for c in cands if c[0] not in REVISIT]
+    r_picks, r_strata = stratified_sample(rev, policy.revisit_cap(n), seed, allocation, subcategories)
+    n_picks, n_strata = stratified_sample(new, n - len(r_picks), seed, allocation, subcategories)
+    strata = [s | {"lane": "new"} for s in n_strata] + [s | {"lane": "revisit"} for s in r_strata]
+    return n_picks + r_picks, strata, {"new": len(n_picks), "revisit": len(r_picks)}

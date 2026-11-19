@@ -238,3 +238,44 @@ def test_budget_invariants_and_determinism(pool, budget, rho, seed):
     shuffled = list(pool)
     random.Random(seed).shuffle(shuffled)
     assert plan.select_ads(shuffled, budget, pol) == (picks, lanes)  # independent of the input order
+
+
+# ── the sample path: the same lanes and the same HARD cap ───────────────────────────────────────────
+
+
+def tup(c):
+    return (c["reason"], c["obs"] | {"list": c["obs"]["list"] | {"page_count": 9}})
+
+
+@settings(max_examples=300, deadline=None)
+@given(
+    pool=pools(),
+    n=st.integers(1, 150),
+    rho=st.sampled_from((0, 0.1, 0.2, 0.25, 0.5, 1.0)),
+    seed=st.integers(0, 2**32),
+    allocation=st.sampled_from(("equal", "proportional")),
+)
+def test_sample_lanes_hard_cap_and_determinism(pool, n, rho, seed, allocation):
+    pol = dataclasses.replace(P, rho=rho)
+    cands = [tup(c) for c in pool]
+    picks, strata, lanes = plan.sample_lanes(cands, n, seed, allocation, None, pol)
+    n_rev = sum(1 for r, _ in cands if r in plan.REVISIT)
+    n_new = len(cands) - n_rev
+    assert lanes["revisit"] == sum(1 for p in picks if p["reason"] in plan.REVISIT)
+    assert lanes["revisit"] == min(n_rev, pol.revisit_cap(n))  # the HARD cap
+    assert lanes["new"] == min(n_new, n - lanes["revisit"])  # unused revisit quota flows to new, never back
+    assert len(picks) == lanes["new"] + lanes["revisit"] <= n
+    assert len({p["obs"]["ad_id"] for p in picks}) == len(picks)
+    assert sum(s["sampled"] for s in strata) == len(picks)
+    shuffled = list(cands)
+    random.Random(seed).shuffle(shuffled)
+    assert plan.sample_lanes(shuffled, n, seed, allocation, None, pol) == (picks, strata, lanes)
+
+
+@settings(max_examples=100, deadline=None)
+@given(pool=pools(), n=st.integers(1, 150), seed=st.integers(0, 2**32))
+def test_an_all_new_sample_is_the_stratified_sample_unchanged(pool, n, seed):
+    cands = [tup(c) for c in pool if c["reason"] == "new"]
+    picks, strata, lanes = plan.sample_lanes(cands, n, seed, "equal", None, P)
+    assert (picks, strata) == plan.stratified_sample(cands, n, seed, "equal", None)
+    assert lanes == {"new": len(picks), "revisit": 0}

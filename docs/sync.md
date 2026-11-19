@@ -98,7 +98,13 @@ What counts as fresh:
   revisits.** This bounds the daily views spent on ads the store already has.
 - `ceil(rho * B)` is computed in exact arithmetic. In floats, ceil(0.07 * 100)
   gives 8, one view too many.
-- `--sample` and `--select recruit` draw from the same gated pool.
+- `--sample` and `--select recruit` draw from the same gated pool, under the
+  same hard cap with B = N (`plan.sample_lanes`). The revisit lane is
+  sampled first, with n = ceil(rho * N); the new lane takes what is left.
+  The lane is one more stratum, so each design weight N_h / n_h stays exact.
+- The postcondition (`plan.assert_admissible`) checks the cap on its own: at
+  most ceil(rho * B) planned ads may already have a listing. A superseding
+  queue is not re-checked, because its own plan was capped.
 
 ## One signed policy
 
