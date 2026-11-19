@@ -202,14 +202,45 @@ step after it.
 - A **crawl-lists step passes only** when all of these hold:
   - it exited 0;
   - the run doc it names is a completed crawl-lists run of this refresh;
-  - its `list.status` is good: `ok`, `end`, `ceiling_hit` or `anchored`
-    (the same set as `liveness.good_crawl`);
+  - its `list.mode` is the mode the step declares (`--mode` in its args);
+  - its `list.status` passes for that mode (`refresh.PASS_STATUS`, below);
   - `observations_written` is above 0, or page 1 itself positively ENDED
     (`end_page: 0`, an empty subcategory).
+
+  | Step's `--mode` | Passes on `list.status` | Exit 14 on |
+  |---|---|---|
+  | `walk` (the census) | `end` only. A clamp is an END (`end_method: clamped`), so it passes | `ceiling_hit`, `short_census`, `end_unknown`, every other value |
+  | `frontier` | `anchored`, `end` or `ceiling_hit` (its GAP is recorded and shown) | `end_unknown`, `ok`, every other value |
+  | none | the good set: `ok`, `end`, `ceiling_hit`, `anchored` | every other value |
+
+  Each set is a subset of `liveness.Rules.good_list_status` (tested), so a
+  refresh never passes a list read that the fetch-ads gate would not count.
+  A census must read the whole list, so its ceiling fails the refresh: size
+  `--max-pages` above the list's length. A frontier may stop at its ceiling,
+  because the bumps it leaves unread are recorded as its GAP.
 - Anything else is recorded as **exit 14**. That is terminal: the approval is
   spent, and fetch-ads never plans from that list read.
+- **The fetch-ads gate** of a refresh takes its sightings only from the list
+  steps of this refresh that passed (`liveness.good_crawl` over the run docs
+  that name this refresh). The strict chain means fetch-ads runs only after
+  every list step passed, so `end`, `anchored` and a frontier's `ceiling_hit`
+  all feed it.
+- **A walk step needs the site's end marker** (ADR-0017 Migration step 5). A
+  census or frontier reaches a positive END only through the source's
+  `end_selectors`. So `refresh` refuses a `--mode walk|frontier` step whose
+  source declares none, with **exit 2**, before any plan is saved or signed
+  (`refresh._needs_end_marker`). It checks the same on every resume. The
+  harness checks only that the selectors are declared. The plug-in's own
+  test shows that they match a saved past-end page, with its status and
+  final_url.
+- The refresh's **run card** has a line per walk step: its mode, its signed
+  ceiling, `--min-pages`, and what it passes on. For a frontier, it also
+  names the reference crawl as DATA holds it now, and that reference's open
+  GAP. The step chooses its reference again when it starts.
 - The refresh's end summary shows:
-  - each crawl-lists step's `list{}`;
+  - each crawl-lists step's `list{}`. A walk step's line also has its mode,
+    its `end_page` and `end_method`, its pages read of its ceiling and its
+    anchor, and a frontier's `GAP after page N (since reference R)` line;
   - each fetch-ads step's selection: eligible, its new and revisit lanes,
     excluded, and its GET, ok and gone counts.
 
@@ -441,7 +472,8 @@ where today's list runs into what the reference crawl already read.
   and is refused with a frontier, as are `--stride` other than 1, `--pages`,
   `--page-count`, `--start` and `--seed`.
 - **Good crawls.** `anchored` is good (liveness.Rules, unchanged), and a
-  refresh's list postcondition passes it.
+  refresh's list postcondition passes it, as it passes a frontier's `end` and
+  `ceiling_hit` (see "Refresh postconditions").
 - **The lanes version is now `select_ads.v4`** (the anchor and reference rules
   are pinned rule code in `plan.py`); the policy digest moves with it and with
   the three new `SyncPolicy` fields.
@@ -463,6 +495,14 @@ where today's list runs into what the reference crawl already read.
   appears in the end summary and on the fetch-ads step's own run card.
 - **The stride-k depth walk is not built yet.** The census and frontier walks
   are (above). The page-count path stays, but it now fails loudly.
+- **A census at its ceiling records no GAP.** Only a frontier writes
+  `list.gap`. A standalone census that hits its ceiling is still a good crawl
+  and may be a later frontier's reference, and that frontier then reports no
+  open GAP. Inside a refresh this cannot happen, because a census at its
+  ceiling fails the step (exit 14).
+- **The end-marker precondition checks a declaration, not a test.** `refresh`
+  refuses a walk step whose source declares no `end_selectors`. It cannot see
+  whether the plug-in tests them on a saved past-end page.
 - **The frontier's reference is chosen at run time, not signed.** It is
   recorded on the run doc and bound by a resume's plan. It only decides where
   the walk may stop early, inside the signed ceiling, so it can save list GETs

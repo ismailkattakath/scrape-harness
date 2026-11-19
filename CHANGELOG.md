@@ -84,6 +84,19 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   recorded as exit 14 (terminal), and the strict chain never reaches fetch-ads.
 - The refresh end summary shows each list step's `list{}` and each fetch-ads
   step's selection. A fetch-ads run that plans nothing prints its `ads{}`.
+- Walk steps in a refresh (ADR-0017 §C.4). A `[crawl.refresh]` crawl-lists
+  step may carry `--mode walk|frontier`, `--min-pages` and `--max-pages`; the
+  bounds sign them. Its postcondition is per mode (`refresh.PASS_STATUS`): a
+  census passes only on `end` (a clamp included); a frontier on `anchored`,
+  `end` or `ceiling_hit` (with its GAP); a step with no mode as before. The
+  run doc's `list.mode` must be the step's declared mode. Anything else is
+  exit 14, and fetch-ads never runs. The refresh run card has a line per walk
+  step (mode, ceiling, what it passes on, a frontier's reference and open
+  GAP), and the end summary shows a walk's mode, pages read, `end_page`,
+  anchor and GAP. See "Refresh postconditions" in [docs/sync.md](docs/sync.md).
+- A walk step enters a refresh only when its source declares `end_selectors`
+  (ADR-0017 Migration step 5): `refresh` refuses it at plan time, exit 2,
+  before any plan is saved.
 
 ### Changed (breaking for consumers)
 
@@ -122,6 +135,12 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
 - A fetch-ads run that plans nothing prints `{"planned": 0, "ads": {...}}`,
   not `{"planned": 0}`. A consumer that matches the old line exactly must
   change.
+
+### Fixed
+
+- approval.v2's signed list set now allows `mode`, `min_pages`, `k` and
+  `policy_digest`. Before, `approve` refused a refresh plan with a walk step
+  (exit 2), because the bounds failed their own schema.
 
 ## [0.1.0] - 2026-11-13
 

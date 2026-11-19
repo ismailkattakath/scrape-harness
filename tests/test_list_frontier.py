@@ -275,7 +275,8 @@ def test_a_frontier_plan_signs_mode_k_and_the_policy_digest(networked, capsys, m
     assert "k" not in approvals.load_plan(base)
 
 
-def test_a_refresh_frontier_step_signs_mode_and_k(tmp_path, monkeypatch, data_dir, operator_key):  # noqa: F811
+def test_a_refresh_frontier_step_signs_mode_and_k(tmp_path, monkeypatch, data_dir, operator_key, marker):  # noqa: F811
+    # marker: a walk step enters a refresh only with the site's end marker (Migration step 5)
     from test_refresh import make_pipeline
 
     p = make_pipeline(tmp_path, monkeypatch, operator_key["fp"], steps=("crawl-lists",))

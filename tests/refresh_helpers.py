@@ -6,6 +6,8 @@ step SUBPROCESSES find it too. Nothing here opens a socket.
   --approve-network, the egress preflight) while it still sends nothing.
 - geocode: a stand-in PAID command. --dry-run prints {"pending": $TEST_GEOCODE_PENDING}; a real run
   appends what it was allowed to DATA/geocode.log and prints {"geocoded": N}.
+- EndSite: the example source with an end marker declared (`end_selectors`), so a walk step may enter a
+  refresh (ADR-0017 Migration step 5); a monkeypatch would never reach the step subprocesses.
 - export-db: a stand-in paid_exempt command that prints a digest; $TEST_EXPORT_FAIL=1 makes it fail once
   (exit 1) so a resume can be tested.
 """
@@ -15,12 +17,18 @@ from __future__ import annotations
 import json
 import os
 
+from example_site.source import ExampleSite
+
 from scrape_harness import cli, store
 from scrape_harness.drivers.fixture import FixtureBackend
 
 
 class NetFixture(FixtureBackend):
     network = True
+
+
+class EndSite(ExampleSite):
+    end_selectors = ("#no-results",)  # the synthetic past-end template's marker (tests/test_refresh_walks.py)
 
 
 def _log(name: str, text: str) -> None:

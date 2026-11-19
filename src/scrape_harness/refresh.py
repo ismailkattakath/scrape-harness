@@ -17,11 +17,18 @@ and stops (exit 3, resumable) unless the count is 0 or the operator passed `--<s
 it then runs with `--max-requests N` if it has that option. A paid_exempt step runs as declared.
 
 A crawl-lists step PASSES only on exit 0 AND its run doc (named by the run_id it prints) being a completed
-crawl-lists run of THIS refresh with a good list.status (liveness.Rules: ok, end, ceiling_hit, anchored) AND
+crawl-lists run of THIS refresh, of the mode the step declares, whose list.status passes for that mode
+(PASS_STATUS: a census walk only on a positive END, a clamp included; a frontier on anchored, end or
+ceiling_hit, the last with its GAP; a step with no mode on the good set, liveness.Rules) AND
 observations_written > 0, or a positive END on page 1 (an empty subcategory) (list_postcondition).
 Anything else that exited 0 is recorded as exit 14, so the strict doit chain stops there and fetch-ads never
-plans from a list read that cannot be trusted. The end summary shows each crawl-lists step's list{} and each
-fetch-ads step's ads{} selection (eligible, lanes, excluded), read from DATA at print time.
+plans from a list read that cannot be trusted. The end summary shows each crawl-lists step's list{} (a walk's
+mode, pages read, end_page, anchor and GAP) and each fetch-ads step's ads{} selection (eligible, lanes,
+excluded), read from DATA at print time.
+
+A walk step (--mode walk|frontier) enters a refresh only when its source declares end_selectors (ADR-0017
+Migration step 5): without the site's end marker a walk can never reach a positive END, so build_bounds
+refuses it (exit 2) before any plan is saved or signed.
 
 Ends. Complete: the approval is spent. TERMINAL (the approval is spent, the run cannot resume): a bound
 breach (a networked step's exit 3), a challenge or cooldown stop (5/6), a parse or yield stop (14: what the
@@ -71,6 +78,17 @@ RUN_ID = re.compile(r"^refresh-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}$")
 DEFAULT_TTL = "12h"
 EXIT_NETWORK = 3
 TERMINAL_CODES = {5: "challenge stop", 6: "site cooldown", 14: "parse or yield stop"}
+# The list.status a crawl-lists step passes on, by its declared --mode (ADR-0017 C.4). A census must read the
+# whole list: only a positive END passes (a clamp is an END, end_method "clamped"); its ceiling, a short census
+# and an unknown end do not. A frontier may stop at its anchor, its END or its ceiling (that GAP is recorded and
+# shown). A step with no mode keeps the good set. Each is a subset of liveness.Rules.good_list_status (tested).
+PASS_STATUS = {
+    None: liveness.DEFAULT.good_list_status,
+    "walk": frozenset({"end"}),
+    "frontier": frozenset({"anchored", "end", "ceiling_hit"}),
+}
+MODE_WORDS = {"walk": "census walk", "frontier": "frontier walk"}
+_DOC = object()  # list_postcondition's default: judge the run doc by its own list.mode
 REFETCH_REASONS = ("card_changed", "new", "stale_7d")  # plan.fetch_reason's values
 
 
@@ -220,6 +238,7 @@ def build_bounds(ttl: str = DEFAULT_TTL, max_ad_requests: int | None = None) -> 
         if st.name == "crawl-lists":
             source = load("sources", ns.source)
             site = source.site
+            _needs_end_marker(ns, source)
             v = cli._variant(ns, source, "list")  # noqa: SLF001
             if cli._networked(ns, [v]):  # noqa: SLF001
                 cli._deterministic(ns)  # noqa: SLF001 - the signed sample is the one crawled
@@ -283,6 +302,21 @@ def build_bounds(ttl: str = DEFAULT_TTL, max_ad_requests: int | None = None) -> 
     if len(proxies) == 1:
         bounds["proxy"] = proxies[0]
     return bounds, networked
+
+
+def _needs_end_marker(ns: argparse.Namespace, source) -> None:
+    """ADR-0017 Migration step 5, checked: a walk step reads to a positive END, which only the site's end marker
+    can show, so a source that declares no end_selectors keeps its walk steps out of the refresh (exit 2, at plan
+    time, before anything is saved or signed). The harness checks that the selectors are declared; that they
+    match the site's saved past-end page is the plug-in's own test."""
+    from . import cli
+
+    if cli._walk(ns) and not tuple(getattr(source, "end_selectors", None) or ()):  # noqa: SLF001
+        print(f"refusing: a refresh's crawl-lists --mode {ns.mode} step ({ns.subcategory}) needs the site's end "
+              f"marker, and source {source.site} declares no end_selectors: add them to the plug-in, with a test "
+              "on a saved past-end page (its status and final_url), before a census or frontier step enters the "
+              "refresh", file=sys.stderr)  # fmt: skip
+        raise SystemExit(cli.EXIT_CONTRACT)
 
 
 def pick_proxy(bounds: dict, proxies: tuple[str, ...]) -> dict:
@@ -362,7 +396,11 @@ def _action(run_id: str, pos: int, step: pipeline.RefreshStep, counts: dict[str,
         _record(run_id, pos, status="running")
         t0 = time.monotonic()
         code, objs = EXEC(argv)
-        why = list_postcondition(run_id, objs) if step.name == "crawl-lists" and code == 0 else None
+        why = (
+            list_postcondition(run_id, objs, mode=_parse(step.name, step.args).mode)
+            if step.name == "crawl-lists" and code == 0
+            else None
+        )
         if why:
             from . import crawl
 
@@ -397,11 +435,12 @@ def _run_doc(objs: list[dict]) -> dict | None:
     return doc if doc.get("run_id") == rid else None
 
 
-def list_postcondition(run_id: str, objs: list[dict]) -> str | None:
+def list_postcondition(run_id: str, objs: list[dict], mode=_DOC) -> str | None:
     """Why a crawl-lists step that exited 0 still FAILS this refresh, or None. It passes only when its run doc
-    is a completed crawl-lists run of THIS refresh with a good list.status (ok, end, ceiling_hit, anchored:
-    liveness.Rules) and at least one observation written, or a positive END on page 1 (an empty
-    subcategory, end_page 0); anything else (an older step, a doc that names no list outcome) fails closed."""
+    is a completed crawl-lists run of THIS refresh, of the step's declared `mode` (default: the doc's own),
+    whose list.status passes for that mode (PASS_STATUS) with at least one observation written, or a positive
+    END on page 1 (an empty subcategory, end_page 0); anything else (an older step, a doc that names no list
+    outcome, a doc of another mode) fails closed."""
     rid = objs[-1].get("run_id") if objs else None
     if not rid:
         return "the step printed no run_id"
@@ -416,8 +455,14 @@ def list_postcondition(run_id: str, objs: list[dict]) -> str | None:
     if doc.get("status") != "completed":
         return f"{rid} has status {doc.get('status')}"
     lst = doc.get("list") or {}
-    if lst.get("status") not in liveness.DEFAULT.good_list_status:  # the ONE good set (liveness.Rules)
-        return f"{rid} has list.status {lst.get('status')}"
+    mode = lst.get("mode") if mode is _DOC else mode
+    if lst.get("mode") != mode:
+        return f"{rid} has list.mode {lst.get('mode')}, not the step's declared {mode}"
+    # never wider than a good crawl: fetch-ads' gate reads liveness.good_crawl for the same steps
+    ok = PASS_STATUS.get(mode, frozenset()) & liveness.DEFAULT.good_list_status
+    if lst.get("status") not in ok:
+        how = f"; a {MODE_WORDS[mode]} passes only on {', '.join(sorted(ok))}" if mode in MODE_WORDS else ""
+        return f"{rid} has list.status {lst.get('status')}{how}"
     empty = lst.get("status") == "end" and lst.get("end_page") == 0  # page 1 positively ENDED: no cards
     if not (lst.get("observations_written") or 0) > 0 and not empty:
         return f"{rid} has 0 observations written"
@@ -533,9 +578,7 @@ def _print_summary(st: dict) -> None:
                      + (f"  {json.dumps(x['summary'], sort_keys=True)}" if x.get("summary") else "")
                      + (f"  ({x['reason']})" if x.get("reason") else ""))  # fmt: skip
         if lst := x.get("list"):
-            lines.append(f"    crawl-lists list: {lst.get('status')}, "
-                         f"{lst.get('observations_written', '-')} observations written"
-                         + (f"; anchored at page {lst['anchor']['page']}" if lst.get("anchor") else ""))  # fmt: skip
+            lines.append(f"    {list_words(lst)}")
             if lst.get("gap"):
                 from . import cli
 
@@ -552,6 +595,46 @@ def _print_summary(st: dict) -> None:
         lines.append(f"  {k} digest {v}")
     print("\n".join(lines), file=sys.stderr)
     print(json.dumps(s, sort_keys=True))
+
+
+def list_words(lst: dict) -> str:
+    """The summary's words for one crawl-lists step's list{}: its outcome and, for a walk, its mode, END page,
+    pages read of its ceiling and anchor (the GAP has its own line)."""
+    obs = f"{lst.get('observations_written', '-')} observations written"
+    anchor = f"; anchored at page {lst['anchor']['page']}" if lst.get("anchor") else ""
+    mode = lst.get("mode")
+    if mode not in MODE_WORDS:
+        return f"crawl-lists list: {lst.get('status')}, {obs}{anchor}"
+    end = (f", end_page {lst['end_page']} ({lst.get('end_method')})" if lst.get("end_page") is not None
+           else "")  # fmt: skip
+    return (f"crawl-lists list ({MODE_WORDS[mode]}): {lst.get('status')}{end}, {lst.get('pages_read', '-')} pages "
+            f"read of {lst.get('ceiling', '-')}, {obs}{anchor}")  # fmt: skip
+
+
+def list_step_lines(bounds: dict) -> list[str]:
+    """The refresh card's line per walk step: its mode, its signed ceiling and what it passes on; a frontier's
+    reference (read from DATA now; the step chooses it again when it starts) and that reference's open GAP."""
+    from . import cli, crawl, plan
+    from .interfaces import load
+
+    out = []
+    for i, x in enumerate(approvals.signed_lists(bounds), 1):
+        mode = x.get("mode")
+        if mode not in MODE_WORDS:
+            continue
+        cap = f"at most {x.get('max_pages')} list GETs"
+        if mode == "walk":
+            least = f", at least {x['min_pages']} pages" if x.get("min_pages") else ""
+            words = f"census walk, {cap}{least}; passes only on a positive END"
+        else:
+            source = load("sources", bounds["site"])
+            ref = plan.frontier_reference(crawl.run_docs(), store.read("events"), store.read("observations"),
+                                          site=bounds["site"], subcategory=x.get("subcategory"),
+                                          region=x.get("region"))  # fmt: skip
+            how = cli.frontier_words({"order": getattr(source, "order", "unordered"), "k": x.get("k")}, ref)
+            words = f"{how}; {cap}; passes on an anchor, a positive END or the ceiling (a GAP)"
+        out.append(f"list step ({i}) {x.get('subcategory')}: {words}")
+    return out
 
 
 # ── the command ────────────────────────────────────────────────────────────────────────────────
@@ -578,6 +661,8 @@ def _card(
         egress="checked by each networked step at its start (its own egress preflight), never the site",
     )
     print(f"steps: {' -> '.join(bounds['steps'])}", file=sys.stderr)
+    for line in list_step_lines(bounds):  # only walk steps: a card with none prints as before
+        print(line, file=sys.stderr)
     print(approvals.bounded_text(bounds), file=sys.stderr)
 
 

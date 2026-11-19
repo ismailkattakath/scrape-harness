@@ -521,6 +521,28 @@
         "snapshot": {
           "const": true,
           "description": "crawl-lists --snapshot: each answered list page is saved, and a 404/410 list page is recorded instead of stopping the run. Absent when not set."
+        },
+        "mode": {
+          "enum": [
+            "walk",
+            "frontier"
+          ],
+          "description": "crawl-lists --mode: walk (the census, to a positive END) or frontier (to a confirmed anchor, a positive END or the ceiling). Absent when not set."
+        },
+        "min_pages": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "crawl-lists --min-pages (a census only): an END before this many pages is a short census (exit 14). Absent when not set."
+        },
+        "k": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "A frontier's anchor window K (SyncPolicy.frontier_k). Absent when not a frontier."
+        },
+        "policy_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "A walk's SyncPolicy digest: the good-crawl and anchor rules its outcome is judged by. Absent when not a walk."
         }
       }
     }

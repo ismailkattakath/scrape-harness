@@ -1,5 +1,6 @@
-"""A refresh's crawl-lists step passes only on exit 0 AND its run doc's list.status ok AND observations
-written > 0; anything else is recorded as exit 14 (terminal: the approval is spent) and the strict doit
+"""A refresh's crawl-lists step passes only on exit 0 AND its run doc's list.status passing for the step's
+mode (here a step with no mode: the good set; per mode in test_refresh_walks) AND observations written > 0;
+anything else is recorded as exit 14 (terminal: the approval is spent) and the strict doit
 chain never reaches fetch-ads. The refresh's summary card shows each fetch-ads step's ads{} selection.
 
 The steps run for real (test_refresh's `chain`); a failing list step is made by DOCTORING the run doc the

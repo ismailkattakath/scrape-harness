@@ -423,6 +423,7 @@ def test_a_refresh_walk_step_signs_mode_and_min_pages_and_bounds_max_pages(
     monkeypatch,
     data_dir,
     operator_key,  # noqa: F811
+    marker,  # a walk step enters a refresh only with the site's end marker (Migration step 5)
 ):
     """R30 in a refresh: a walk step's signed set carries mode and min_pages, and its bounds count exactly
     max_pages list GETs (no `1 + max_pages` discovery allowance)."""

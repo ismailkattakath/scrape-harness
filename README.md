@@ -86,21 +86,54 @@ sit in one signed `SyncPolicy`. A policy change after an approval refuses
 the same gate. The run doc's `ads{}` records the selection, and the run card's
 Selection row shows it. See [docs/sync.md](docs/sync.md).
 
+## crawl-lists: how a list is read
+
+| Mode | Reads | Ends `completed` at |
+|---|---|---|
+| none (a sample) | page 1, then the pages it plans from the page count | the planned pages (`ok`) |
+| `--pages 1,2,9` | exactly these pages | the named pages (`ok`) |
+| `--mode walk` (the census) | 1, 2, 3, ..., one page ahead | a positive END (`end`), or its ceiling (`ceiling_hit`) |
+| `--mode frontier` | 1, 2, 3, ..., one page ahead | a confirmed anchor (`anchored`), a positive END, or its ceiling (`ceiling_hit`, with a GAP) |
+
+- A **positive END** is the site's own "no results" page: the source's
+  `end_selectors` match, 0 cards are parsed, and the page was not redirected.
+- `--max-pages` is **every list GET** of a walk, the END page included.
+  `--min-pages` (census only) makes an END before that page exit 14.
+- `mode`, `min_pages`, a frontier's `k` and the policy digest are signed in
+  the plan, and in a refresh's list set.
+- A frontier stops early only when the source declares
+  `order = "bump_desc"`. See [docs/sync.md](docs/sync.md).
+
 ## refresh: the whole chain under one approval
 
 `<cli> refresh` runs `[crawl.refresh].steps` in order under ONE bounded
 approval. It is a **strict chain**: a failed step stops every step after it.
 
+- A crawl-lists step may carry `--mode walk|frontier`, `--min-pages` and
+  `--max-pages` in its `args`. The bounds sign each step's set and count
+  exactly `--max-pages` list GETs for a walk.
+- A walk step needs a source that declares `end_selectors`. Without them
+  `refresh` refuses it at plan time, with **exit 2**.
 - A **crawl-lists step passes only** when all of these hold:
   - it exited 0;
-  - its run doc has `list.status: ok`;
-  - it wrote at least one observation.
+  - its run doc is of the step's mode, with a passing `list.status`:
+
+    | Step | Passes on |
+    |---|---|
+    | `--mode walk` | `end` (a clamp included) |
+    | `--mode frontier` | `anchored`, `end` or `ceiling_hit` (shown as a GAP) |
+    | no mode | `ok`, `end`, `ceiling_hit` or `anchored` |
+  - it wrote at least one observation, or page 1 positively ENDED (an empty
+    subcategory).
 - Anything else is recorded as **exit 14**. That is terminal: the approval is
   spent, and fetch-ads never runs on a list read that cannot be trusted.
 - Inside a refresh, "fresh" means sighted by a list step of **this** refresh
   that passed.
-- The end summary shows each list step's `list{}` and each fetch-ads step's
-  selection: eligible, its lanes and excluded.
+- The run card has a line per walk step: its mode, its ceiling and what it
+  passes on (a frontier's reference and open GAP too).
+- The end summary shows each list step's `list{}`, with a walk's mode, pages
+  read, `end_page`, anchor and GAP, and each fetch-ads step's selection:
+  eligible, its lanes and excluded.
 
 | Ends | Exit codes |
 |---|---|
