@@ -58,10 +58,11 @@ def test_every_policy_field_changes_the_digest(field):
 
 
 @pytest.mark.parametrize(
-    "rho, budget, cap", [(0.2, 300, 60), (0.1, 30, 3), (0.2, 1, 1), (0.2, 0, 0), (0.3, 10, 3), (0, 300, 0)]
+    "rho, budget, cap",
+    [(0.2, 300, 60), (0.07, 100, 7), (0.1, 30, 3), (0.2, 1, 1), (0.2, 0, 0), (0.3, 10, 3), (0, 300, 0)],
 )
 def test_revisit_cap_is_exact_ceil(rho, budget, cap):
-    # float math says ceil(0.2 * 300) = 61 and ceil(0.1 * 30) = 4; the cap must not drift up by one
+    # float math says ceil(0.07 * 100) = 8 (0.07 * 100 is 7.000000000000001); the cap must not drift up by one
     assert dataclasses.replace(P, rho=rho).revisit_cap(budget) == cap
 
 

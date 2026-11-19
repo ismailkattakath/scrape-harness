@@ -8,6 +8,50 @@ The version is the one in `pyproject.toml`.
 
 ## [Unreleased]
 
+Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
+
+### Added
+
+- Exit 14 (`crawl.EXIT_PARSE`): a parse or yield stop, terminal, with a
+  `parse` incident (and `gone_storm` for a breaker trip).
+- Additive, optional contract fields. run.v1 gains `stop{}`, `list{}`,
+  `ads{}` and `breaker{}`. event.v1 gains `ad_id` and the kind `parse_failed`.
+  approval.v2 bounds gain `policy_digest`. Old records still validate.
+- `liveness.py`: a pure per-ad ledger with four states (alive, tombstoned,
+  quarantined, held). `corrections.py`: one reader of run corrections.
+- `policy.SyncPolicy`: window, revisit share, stale age, re-admission delay,
+  breaker values and the lanes version. Its digest is signed.
+- The fresh-sighting gate (`plan.eligible`) and `plan.select_ads`. Revisits
+  are hard-capped at ceil(rho * B), and unused new quota never flows to
+  revisits. The backlog stays dormant: 0 GETs, nothing deleted.
+- `plan.admit` and an independent postcondition, `plan.assert_admissible`.
+- The gone-storm and ad-failure breaker (`breaker.py`), with a per-site latch.
+  `<cli> breaker status` and `<cli> breaker clear --approve-operator` were
+  added.
+- Refresh postconditions. A crawl-lists step passes only on exit 0, a run doc
+  with `list.status` ok, and at least one observation written. Anything else is
+  recorded as exit 14 (terminal), and the strict chain never reaches fetch-ads.
+- The refresh end summary shows each list step's `list{}` and each fetch-ads
+  step's selection. A fetch-ads run that plans nothing prints its `ads{}`.
+
+### Changed (breaking for consumers)
+
+- A list handler error, a missing page count (before: exit 4) and a list read
+  that yields no observation now end with exit 14.
+- A list page that fails after its retries, or that robots.txt blocks, now ends
+  the crawl with exit 13, not `completed`.
+- An ad page that fails to parse records one `parse_failed` event, and the ad
+  is held. It is never retried.
+- fetch-ads plans only from the gate. Its plan signs `as_of` (the plan time)
+  and `policy_digest`, so plan hashes now depend on the plan time.
+- `crawl resume` of a fetch-ads run now makes a new, filtered, superseding run.
+- `cli.fetch_plan` was removed. Use `cli.fetch_pool` and the selection.
+- Gone events carry `ad_id`. A consumer's golden digests need re-recording
+  when it bumps its harness pin.
+- A fetch-ads run that plans nothing prints `{"planned": 0, "ads": {...}}`,
+  not `{"planned": 0}`. A consumer that matches the old line exactly must
+  change.
+
 ## [0.1.0] - 2026-11-13
 
 ### Added

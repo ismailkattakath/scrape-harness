@@ -77,7 +77,9 @@ def test_only_old_sightings_send_zero_gets_at_budget_300(data_dir, capsys):
     FixtureHttpClient.log.clear()
     capsys.readouterr()
     assert main(["fetch-ads", "--max-fetches", "300", *FIX]) == 0
-    assert json.loads(capsys.readouterr().out.splitlines()[-1]) == {"planned": 0}
+    out = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert out["planned"] == 0  # and the line now says why: the whole backlog is dormant
+    assert out["ads"]["eligible"] == 0 and out["ads"]["excluded"]["dormant"] == 400
     assert FixtureHttpClient.log == [] and not list((data_dir / "runs").glob("*fetch-ads*"))
     assert dry(capsys, "--max-fetches", "300") == []
 

@@ -65,6 +65,48 @@ them, and the refusal names every one. Then:
 consumer: every site specific lives outside its repository, and its tests run
 on a synthetic site.
 
+## fetch-ads: which ad pages get a view
+
+Every ad GET adds a view to a real person's ad, so `fetch-ads` plans only
+ads that pass the **fresh-sighting gate**:
+
+- **alive** in the liveness ledger: not tombstoned, quarantined or held;
+- **freshly sighted** by a good, non-sponsored list card;
+- **due**: `new`, `card_changed` or `stale_7d`.
+
+Ads that were only sighted long ago stay **dormant**: they get 0 GETs and
+nothing is deleted. `--max-fetches` (B) is a **ceiling**, filled by two lanes:
+
+- **revisits** are hard-capped at ceil(rho * B);
+- **new** ads get the rest.
+
+Unused revisit quota flows to new ads, and never the other way. The tunables
+sit in one signed `SyncPolicy`. A policy change after an approval refuses
+(exit 10). `--supersede` and `crawl resume` admit a queued request through
+the same gate. The run doc's `ads{}` records the selection, and the run card's
+Selection row shows it. See [docs/sync.md](docs/sync.md).
+
+## refresh: the whole chain under one approval
+
+`<cli> refresh` runs `[crawl.refresh].steps` in order under ONE bounded
+approval. It is a **strict chain**: a failed step stops every step after it.
+
+- A **crawl-lists step passes only** when all of these hold:
+  - it exited 0;
+  - its run doc has `list.status: ok`;
+  - it wrote at least one observation.
+- Anything else is recorded as **exit 14**. That is terminal: the approval is
+  spent, and fetch-ads never runs on a list read that cannot be trusted.
+- Inside a refresh, "fresh" means sighted by a list step of **this** refresh
+  that passed.
+- The end summary shows each list step's `list{}` and each fetch-ads step's
+  selection: eligible, its lanes and excluded.
+
+| Ends | Exit codes |
+|---|---|
+| **Terminal** (approval spent) | 3 (a bound breach), 5 and 6 (a challenge or cooldown), 14 (a parse or yield stop, a breaker trip, a failed list postcondition), expiry, revocation, `--abandon` |
+| **Resumable** (same run id, same approval) | 4, 7, 8, 10, 12, 13, a crash |
+
 ## Flake outputs
 
 | Output | Use |

@@ -53,7 +53,7 @@ class SyncPolicy:
         return timedelta(days=self.stale_after_d)
 
     def revisit_cap(self, budget: int) -> int:
-        """ceil(rho * B) in exact arithmetic: in floats ceil(0.2 * 300) is 61, one view too many."""
+        """ceil(rho * B) in exact arithmetic: in floats ceil(0.07 * 100) is 8, one view too many."""
         return math.ceil(Fraction(str(self.rho)) * max(budget, 0))
 
     def rules(self):

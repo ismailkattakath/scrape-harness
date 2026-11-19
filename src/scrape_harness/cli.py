@@ -808,7 +808,7 @@ def cmd_fetch_ads(args: argparse.Namespace) -> int:
     if len(sites) > 1:
         raise SystemExit("fetch-ads: one site per run; pass observations of one site")
     if not todo:
-        print(json.dumps({"planned": 0}))
+        print(json.dumps({"planned": 0, "ads": sel.ads}))  # no run doc: the selection says why
         return 0
     source = load("sources", sites.pop())
     variant = _variant(args, source, "ad")
