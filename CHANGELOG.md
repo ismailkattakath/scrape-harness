@@ -12,6 +12,18 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
 
 ### Added
 
+- `crawl-lists --snapshot`: each answered list page is saved as gzip under
+  `raw/lists/<site>/<crawl_id>/<page>.html.gz`, with a `list_snapshot.v1`
+  sidecar (status, final_url, requested_url, fetched_at, parsed, skipped),
+  before any parse or stop. A 404/410 list page is saved and recorded
+  (`list.status: past_end`), not a challenge stop; a redirected page is saved,
+  its cards not kept (`redirected`). A challenge still stops with exit 5. See
+  "Evidence runs" in [docs/sync.md](docs/sync.md).
+- `crawl-lists --pages 1,2,400`: exactly these pages, in order, no page-count
+  discovery. Signed in the plan and in a refresh's list set (only when set, so
+  older plans hash as before); bounded by `--max-pages`; refused with
+  `--stride`, `--start`, `--seed` or `--page-count`.
+- `ListPage.skipped` (optional): cards the parser could not read.
 - Exit 14 (`crawl.EXIT_PARSE`): a parse or yield stop, terminal, with a
   `parse` incident (and `gone_storm` for a breaker trip).
 - Additive, optional contract fields. run.v1 gains `stop{}`, `list{}`,

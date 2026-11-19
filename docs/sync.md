@@ -213,6 +213,54 @@ step after it.
   list step therefore fails the postcondition, the same way fetch-ads would
   find no fresh sighting from it.
 
+## Evidence runs: list snapshots and named pages
+
+The first piece of slice 2. It lets the operator take ONE approved run of a
+redesigned list: page 1, page 2 and a past-end page, with 0 ad views. Walk
+modes, positive END and anchors are not built yet.
+
+```
+<cli> crawl-lists --subcategory X --pages 1,2,400 --snapshot --plan
+```
+
+| Flag | Does |
+|---|---|
+| `--pages 1,2,400` | Reads exactly these pages, in this order. No page-count discovery, no sample weight. |
+| `--snapshot` | Saves each answered list page as `raw/lists/<site>/<crawl_id>/<page>.html.gz` (ADR-0005), with a `list_snapshot.v1` sidecar `<page>.json`. |
+
+**Signed.** Both join the plan (`run_plan`) and a refresh's signed list set
+(`approvals.list_args`) only when set. So a plan without them hashes as before.
+A different page list, or a different order, is a different plan_hash.
+
+**Bounded.** `--pages` counts toward `--max-pages` and is refused when it names
+more, never truncated. It is refused with `--stride` other than 1, `--start`,
+`--seed` or `--page-count`. Its GETs run under the same politeness ceiling.
+
+**Saved before any decision.** `challenge.detect` is pure, so it runs first.
+Then, before any parse or stop, the body and its sidecar are written. The
+sidecar holds what HTML alone cannot prove: `status`, `final_url`,
+`requested_url`, `fetched_at`, `reason`, `outcome`, `parsed`, `skipped`, and
+the body's raw_ref. `parsed`/`skipped` are filled in after the parse, before
+the handler's own stop.
+
+| The page | Outcome | The run |
+|---|---|---|
+| A normal list page | `listed` | Rows kept, as without `--snapshot` |
+| Page 1 with no page count (discovery mode) | `listed` | Still exit 14 `parse_drift`; the page and its counts are saved |
+| 404 or 410 | `past_end` | Saved and recorded, no rows, **not** a challenge, no cooldown; the run goes on |
+| 200 at another URL (a redirect) | `redirected` | Saved, cards counted but **not** kept: they are not the page asked for |
+| A challenge sign (cf_mitigated, a challenge title, a marker, captcha, 403/429/503, a login redirect) or any other error status | `stopped` | Exit 5, as today. Sidecar only: the body stays in STATE `stops/`, never synced |
+| No list expectation and no challenge sign (`unexpected_page`, `signin_wall`, `consent_gate`) | `stopped` | Exit 5, as today. The body is saved: it is the site's own page |
+
+**Fail-closed.** Without `--snapshot`, a 404 list page is still a challenge stop
+(exit 5). A run that recorded a `past_end` or `redirected` page completes with
+`list.status` `past_end` or `redirected`, never `ok`. So it is never a good
+crawl: its sightings feed no fetch-ads gate and it is never a reference crawl.
+`list.snapshot{dir, saved, past_end, redirected}` on the run doc names them.
+
+**A refused write** (the data folder, a full disk) takes slice 1's path: exit 4,
+the list page handed back for the resume, no retry GET.
+
 ## Known gaps in slice 1
 
 - **A held ad has no clear path yet.** `reparse` walks only listings that have
