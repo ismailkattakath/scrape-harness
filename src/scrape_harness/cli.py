@@ -79,8 +79,11 @@ def list_handler(job: crawl.Run, source, max_pages: int):
         weight = m.get("sample_weight")
         page_count = m.get("page_count") or lp.page_count
         if m.get("discover"):  # page 1 told us the page count: now plan the sample, once
-            if lp.page_count is None:
-                raise crawl.Stop(EXIT_CONFIG, "page count not found on page 1; pass --page-count")
+            if lp.page_count is None:  # its rows are kept first: the page was read, its view is spent
+                keep(lp.observations, None, None)
+                job.doc.setdefault("list", {})["status"] = "parse_drift"
+                raise crawl.Stop(crawl.EXIT_PARSE, "STOPPED: page count not found on page 1 (parser drift?); "
+                                 "plan a new crawl with --page-count")  # fmt: skip
             start, pages = plan.systematic_pages(lp.page_count, m["stride"], m.get("start"), m.get("seed"))
             weight = plan.sample_weight(lp.page_count, pages)
             new = [
@@ -101,20 +104,46 @@ def list_handler(job: crawl.Run, source, max_pages: int):
             ]
             if 1 not in pages:  # page 1 was read only to learn the count: its sightings are out of sample
                 weight = None
-        for o in lp.observations:
+        keep(lp.observations, page_count, weight)
+        return new
+
+    def keep(observations: list[dict], page_count: int | None, weight: float | None) -> None:
+        for o in observations:
             o["crawl_id"] = job.doc["run_id"]
             o["list"]["page_count"] = page_count
             o["list"]["sample_weight"] = weight
-        store.append("observations", lp.observations)
-        return new
+        store.append("observations", observations)
 
     return handle
+
+
+def list_outcome(job: crawl.Run, stop: crawl.Stop | None) -> crawl.Stop | None:
+    """crawl-lists' postcheck: record the observations this run wrote (recounted by its crawl_id, across
+    every attempt). List pages that answered but left no observation are a zero yield: exit 14, terminal,
+    never a `completed` reference crawl."""
+    n = sum(1 for o in store.read("observations") if o.get("crawl_id") == job.doc["run_id"])
+    lst = job.doc.setdefault("list", {})
+    lst["observations_written"] = n
+    if stop is not None:
+        return None
+    if n == 0 and job.doc.get("requests", {}).get("list_pages", 0) > 0:
+        lst["status"] = "zero_yield"
+        job.doc["status"] = "stopped"
+        return crawl.Stop(crawl.EXIT_PARSE, f"STOPPED: zero yield: {job.doc['requests']['list_pages']} list "
+                          "page requests and no observation written (no cards, or the parser drifted)")  # fmt: skip
+    lst["status"] = "ok"
+    return None
 
 
 def ad_handler(source):
     def handle(m: dict, res: FetchResult) -> None:
         fetched_at = utcnow()
-        rec = source.parse_ad(res.html, url=res.url, fetched_at=fetched_at, fetch_reason=m["reason"])
+        try:
+            rec = source.parse_ad(res.html, url=res.url, fetched_at=fetched_at, fetch_reason=m["reason"])
+        except Exception:
+            if m.get("ad_id"):  # keep the page that could not be parsed: a fixed parser reparses it, no view
+                store.write_raw(m.get("site") or source.site, m["ad_id"], fetched_at, res.html)
+            raise  # the crawl records ONE parse_failed event and never retries it
         if not rec["location"]["city_label"]:
             rec["location"]["city_label"] = m.get("card_city_label")
         # The snapshot first: a later selector can then be applied by `<cli> reparse`, with no new view.
@@ -181,9 +210,10 @@ def _execute(
     handle,
     requests: list[dict] | None,
     card: dict | None = None,
+    postcheck=None,
 ) -> int:
     try:
-        crawl.run(job, source, handle, _polite(args), requests, _opts(args), card)
+        crawl.run(job, source, handle, _polite(args), requests, _opts(args), card, postcheck)
     except crawl.Stop as s:
         print(str(s), file=sys.stderr)
         _refund_if_unsent(job, s)
@@ -436,7 +466,7 @@ def cmd_crawl_lists(args: argparse.Namespace) -> int:
         # crawlee's ceiling: the planned pages, or page 1 plus the most its sample may add
         "ceiling": len(reqs) if args.page_count else 1 + args.max_pages,
     }
-    return _execute(args, job, source, list_handler(job, source, args.max_pages), reqs, card)
+    return _execute(args, job, source, list_handler(job, source, args.max_pages), reqs, card, list_outcome)
 
 
 def fetch_plan(now: datetime) -> list[tuple[str, dict]]:
@@ -634,7 +664,13 @@ def cmd_fetch_ads(args: argparse.Namespace) -> int:
         {
             "url": o["ad_url"],
             "kind": "ad",
-            "meta": {"reason": r, "card_city_label": o["card"].get("city_label")},
+            # ad_id and site travel with the request, so a parse_failed event names its ad
+            "meta": {
+                "reason": r,
+                "card_city_label": o["card"].get("city_label"),
+                "ad_id": o["ad_id"],
+                "site": o["site"],
+            },
         }
         for r, o in todo
     ]
@@ -710,6 +746,12 @@ def cmd_crawl_correct(args: argparse.Namespace) -> int:
 
 def cmd_crawl_resume(args: argparse.Namespace) -> int:
     job = crawl.Run.load(args.run_id)
+    stop, lst = job.doc.get("stop") or {}, job.doc.get("list") or {}
+    if stop.get("code") == crawl.EXIT_PARSE or lst.get("status") in ("zero_yield", "parse_drift"):
+        # its stopping request is DONE: a resume would drain to `completed` and pass for a reference crawl
+        print(f"refusing: run {job.doc['run_id']} stopped terminally (exit {crawl.EXIT_PARSE}: "
+              f"{stop.get('reason') or lst.get('status')}); plan a new run instead", file=sys.stderr)  # fmt: skip
+        return crawl.EXIT_PARSE
     source = load("sources", job.doc["source"])
     # the plan signs the proxy the run will actually use: its own (a resume keeps it), not a new choice
     args.kept_proxy = (job.doc.get("proxy") or {}).get("url")
@@ -744,7 +786,7 @@ def cmd_crawl_resume(args: argparse.Namespace) -> int:
         source,
         handle,
         None,
-        {
+        card={
             "command": "crawl resume",
             "purpose": f"resume {job.doc['command']} run {job.doc['run_id']}",
             # what is pending (a list crawl's page 1 may still plan up to max_pages more); unknown: none
@@ -752,6 +794,7 @@ def cmd_crawl_resume(args: argparse.Namespace) -> int:
             if (left := crawl.pending(job)) is None
             else left + (args.max_pages if job.doc["command"] == "crawl-lists" else 0),
         },
+        postcheck=list_outcome if job.doc["command"] == "crawl-lists" else None,
     )
 
 

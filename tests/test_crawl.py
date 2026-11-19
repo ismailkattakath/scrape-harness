@@ -80,13 +80,24 @@ def test_one_at_a_time_dedup_and_robots(data_dir, tmp_path):
     opts = fixtures(tmp_path, {f"{ORIGIN}/private/x": "list-p1.html"})
     job = crawl.Run.new("crawl-lists", "desktop", "example.invalid")
     rec = Rec()
-    crawl.run(
-        job, ExampleSite(), rec, FAST, reqs(f"{LIST}?page=1", f"{LIST}?page=1", f"{ORIGIN}/private/x"), opts
-    )
+    with pytest.raises(crawl.Stop) as e:
+        crawl.run(
+            job,
+            ExampleSite(),
+            rec,
+            FAST,
+            reqs(f"{LIST}?page=1", f"{LIST}?page=1", f"{ORIGIN}/private/x"),
+            opts,
+        )
     assert rec.done == [f"{LIST}?page=1"]  # deduplicated by unique_key; robots.txt Disallow skipped
+    gets = FixtureBackend.last.gets
+    assert gets.count(f"{LIST}?page=1") == 1 and f"{ORIGIN}/private/x" not in gets
     assert FixtureBackend.last.max_inflight == 1
     kinds = [e["kind"] for e in store.read("events")]
-    assert kinds[0] == "started" and "robots_disallowed" in kinds and kinds[-1] == "completed"
+    assert kinds[0] == "started" and "robots_disallowed" in kinds
+    # a list page the walk cannot read is a hole: the run stops (resumable), never `completed`
+    assert e.value.code == crawl.EXIT_INCOMPLETE and "completed" not in kinds
+    assert job.doc["status"] == "stopped" and job.doc["list"]["status"] == "blocked"
 
 
 def test_challenge_stops_and_resume_finishes_without_refetch(data_dir, tmp_path):

@@ -25,7 +25,20 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
-from . import browser, challenge, egress, incidents, pipeline, proxy, runcard, runlog, status, store, variants
+from . import (
+    browser,
+    challenge,
+    contracts,
+    egress,
+    incidents,
+    pipeline,
+    proxy,
+    runcard,
+    runlog,
+    status,
+    store,
+    variants,
+)
 from .interfaces import FetchResult, load, plugin_class
 
 DEFAULT_RATE = 7  # requests per minute (~8.6 s apart), the default for every networked run
@@ -54,6 +67,9 @@ EXIT_UNREACHABLE, EXIT_INCOMPLETE = 12, 13
 # what came back cannot be trusted. Terminal, never resumed into a reference crawl; it opens a `parse`
 # incident (a breaker trip a `gone_storm` one). Not a challenge, so it never counts toward the cooldown.
 EXIT_PARSE = 14
+# 4: the DATA root refused a write mid-run (store.DataDirError, the CLI's EXIT_CONFIG). Resumable: the page
+# whose rows could not be written is handed back to the queue, so a resume reads it again.
+EXIT_DATA = 4
 UNREACHABLE_AFTER = 5  # consecutive page attempts with no response at all (timeouts, refused connections)
 
 
@@ -101,6 +117,7 @@ def event(
     until: str | None = None,
     site: str | None = None,
     evidence: dict | None = None,
+    ad_id: str | None = None,
 ) -> dict:
     e = {
         "schema": "event.v1",
@@ -114,6 +131,8 @@ def event(
     }
     if evidence is not None:
         e["evidence"] = evidence
+    if ad_id:  # only when known: events before the field (and those about no ad) keep their exact shape
+        e["ad_id"] = ad_id
     store.append("events", [e])
     return e
 
@@ -635,12 +654,16 @@ def _counting(client, counts: dict) -> None:
 
 
 def _requests(rs: list[dict]):
+    return [_request(r) for r in rs]
+
+
+def _request(r: dict, unique_key: str | None = None):
+    """One crawlee request; its key is its URL (the queue's dedup), except a lost list page queued again."""
     from crawlee import Request
 
-    return [
-        Request.from_url(r["url"], unique_key=r["url"], user_data={"kind": r["kind"], **r["meta"]})
-        for r in rs
-    ]
+    return Request.from_url(
+        r["url"], unique_key=unique_key or r["url"], user_data={"kind": r["kind"], **r["meta"]}
+    )
 
 
 def _unreachable(job: Run, url: str, error: Exception, n: int) -> Stop:
@@ -832,6 +855,38 @@ async def _crawl(
             stopped.append(_unreachable(job, ctx.request.url, error, silent[0]))
             crawler.stop("unreachable")
 
+    walk = job.doc["command"] == "crawl-lists"  # a list walk: a lost list page leaves a hole in it
+
+    def halt(stop: Stop, why: str) -> None:
+        """Stop the run from inside a handler: record it (the first stop wins), save status `stopped`, ask
+        crawlee to stop. Bookkeeping never raises out of here: an exception escaping a handler is a retry,
+        and a retry is a second GET."""
+        if not stopped:
+            stopped.append(stop)
+        try:
+            job.doc["status"] = "stopped"
+            job.save()
+        except Exception as e:  # noqa: BLE001 - the stop itself must still happen
+            runlog.LOG.warning("could not save the stopped run: %s", e, extra={"event": "stop_unsaved"})
+        crawler.stop(why)
+
+    def list_status(value: str) -> None:
+        job.doc.setdefault("list", {}).setdefault("status", value)  # the first cause is the one recorded
+
+    def parse_failed(req, error: Exception) -> None:
+        """An ad page that answered but could not be parsed or validated: ONE event, no retry (its view is
+        spent; a second GET would be another). Its snapshot, when saved, stays for a reparse."""
+        m = req.user_data
+        try:
+            event(rid, "parse_failed", req.url, type(error).__name__, site=m.get("site") or job.doc["source"],
+                  ad_id=m.get("ad_id") or None)  # fmt: skip
+        except Exception as e:  # noqa: BLE001 - never a retry, even when the event cannot be written
+            runlog.LOG.warning(
+                "could not record parse_failed: %s", e, extra={"event": "parse_failed_unsaved"}
+            )
+        runlog.LOG.warning("parse_failed %s (%s: %s)", urlsplit(req.url).path, type(error).__name__, error,
+                           extra={"event": "parse_failed", "reason": type(error).__name__})  # fmt: skip
+
     @crawler.error_handler
     async def on_error(ctx, error: Exception) -> None:
         breaker(ctx, error)
@@ -876,13 +931,43 @@ async def _crawl(
             stopped.append(_challenge(job, ctx.request.url, reason, res, n_hops))
             crawler.stop(f"challenge: {reason}")
             raise ChallengeDetected(reason)  # crawlee reclaims the request: it stays pending for resume
-        new = handle(dict(ctx.request.user_data), res)
+        # The handler's own failures never reach crawlee: it would retry them (a second GET, for an ad page
+        # a second view) and then record the run `completed`. Order matters: a DataDirError or a Stop is
+        # never mistaken for a parse failure.
+        try:
+            new = handle(dict(ctx.request.user_data), res)
+        except store.DataDirError as e:  # resumable: the page is handed back, the resume reads it again
+            halt(Stop(EXIT_DATA, f"STOPPED: the data folder refused a write ({e}); fix it, then "
+                                 f"`{pipeline.consumer().cli} crawl resume`"), "data folder")  # fmt: skip
+            raise ChallengeDetected("data folder") from None  # crawlee reclaims the request: still pending
+        except Stop as s:  # terminal: this request is DONE, so a resume could never read it again
+            if kind == "list":
+                list_status("failed")
+            msg = str(s) if s.code == EXIT_PARSE else f"{s} (stopped by the handler, exit {s.code})"
+            halt(Stop(EXIT_PARSE, msg or "stopped by the handler"), "handler stop")
+            return
+        except Exception as e:  # noqa: BLE001 - a parser or contract error: what came back cannot be used
+            if kind == "ad":
+                parse_failed(ctx.request, e)
+                return  # the run goes on: one ad that cannot be parsed is no reason to stop the others
+            list_status("failed")
+            what = (
+                "violates its contract" if isinstance(e, contracts.ContractError) else "could not be parsed"
+            )
+            halt(Stop(EXIT_PARSE, f"STOPPED: list page {ctx.request.url} {what} ({type(e).__name__}: {e})"),
+                 "list page unusable")  # fmt: skip
+            return
         if new:  # dynamic enqueue (e.g. the sample planned from page 1's page count)
             await queue.add_requests(_requests(new))
 
     @crawler.on_skipped_request
     async def skipped(url: str, reason) -> None:
-        event(rid, "robots_disallowed" if "robots" in str(reason) else "failed_request", url, str(reason))
+        robots = "robots" in str(reason)
+        event(rid, "robots_disallowed" if robots else "failed_request", url, str(reason))
+        if walk and robots:  # a list page the walk needs is out of bounds: the walk can no longer complete
+            list_status("blocked")
+            halt(Stop(EXIT_INCOMPLETE, f"STOPPED: robots.txt disallows list page {url}; the walk has a hole "
+                                       "a resume cannot fill"), "robots.txt")  # fmt: skip
 
     @crawler.failed_request_handler
     async def failed(ctx, error: Exception) -> None:
@@ -891,6 +976,20 @@ async def _crawl(
         attempts.errored(ctx.request.unique_key)
         log_page(ctx.request, None)
         event(rid, "failed_request", ctx.request.url, type(error).__name__)
+        if walk and ctx.request.user_data.get("kind", "list") == "list":
+            # crawlee has marked it handled (ERROR), so the queue alone would drain to `completed` with a
+            # hole. Queue the same page again under a fresh key, for the resume, and stop now. Also when a
+            # stop is already under way: a page handed back once (a reclaim spends its one retry) that is
+            # handed back again lands here, and must still be read by the resume. That stop and the status
+            # it saved (e.g. `aborted` by a cooldown) are left as they are.
+            if not stopped:
+                list_status("failed")
+                halt(Stop(EXIT_INCOMPLETE, f"STOPPED: list page {ctx.request.url} failed ({type(error).__name__})"
+                                           f" after its retry; `{pipeline.consumer().cli} crawl resume` reads it "
+                                           "again"), "list page failed")  # fmt: skip
+            again = {"url": ctx.request.url, "kind": "list", "meta": {k: v for k, v in
+                     ctx.request.user_data.items() if k != "kind" and not k.startswith("__")}}  # fmt: skip
+            await queue.add_requests([_request(again, f"{ctx.request.url}#again-{secrets.token_hex(3)}")])
 
     await crawler.run()
     await backend.close()
@@ -909,6 +1008,11 @@ async def _crawl(
         return Stop(
             EXIT_INCOMPLETE, f"STOPPED: {reason}; `{pipeline.consumer().cli} crawl resume` continues it."
         )
+    if (job.doc.get("list") or {}).get("status") == "blocked":  # an earlier attempt's hole stays a hole
+        job.doc["status"] = "stopped"
+        job.save()
+        return Stop(EXIT_INCOMPLETE, "STOPPED: robots.txt disallowed a list page of this walk; it cannot "
+                                     "complete. Plan a new crawl.")  # fmt: skip
     return None
 
 
@@ -957,19 +1061,27 @@ def _run(
     requests: list[dict] | None = None,
     backend_opts: dict | None = None,
     card_info: dict | None = None,
+    postcheck: Callable[[Run, Stop | None], Stop | None] | None = None,
 ) -> int:
     """The run itself; `run` wraps it in the live log."""
     name = (backend_opts or {}).get("backend") or variants.get(job.doc["variant"]).backend
     counts = {k: 0 for k in ZERO}
     _preflight(job, polite, name, counts, card_info)
     event(job.doc["run_id"], "started" if requests is not None else "resumed")
+    if requests is None and (job.doc.get("list") or {}).get("status") == "failed":
+        del job.doc["list"]["status"]  # its lost page was queued again: this attempt decides afresh
+    stop, ended = None, False
     try:
         stop = asyncio.run(
             _crawl(job, requests, source, handle, polite, backend_opts or {}, counts, _ceiling(card_info))
         )
+        ended = True
     finally:
         _count(job, counts)  # recorded however the attempt ended
-        job.save()
+        job.save()  # before the postcheck, so a postcheck that raises cannot lose the counts
+        if postcheck is not None and ended:  # the command's verdict on what the attempt wrote (zero yield)
+            stop = postcheck(job, stop) or stop
+            job.save()
         if pp := per_page(job.doc["requests"]):
             runlog.LOG.info(
                 "site sub-resources per page: blocked %s / answered %s / sent %s (%s pages)",
@@ -979,6 +1091,7 @@ def _run(
     if stop:
         raise stop
     job.doc["status"] = "completed"
+    job.doc.pop("stop", None)  # an earlier attempt's stop, now resumed to the end
     job.save()
     event(job.doc["run_id"], "completed")
     return 0
@@ -1048,14 +1161,16 @@ def run(
     requests: list[dict] | None = None,
     backend_opts: dict | None = None,
     card_info: dict | None = None,
+    postcheck: Callable[[Run, Stop | None], Stop | None] | None = None,
 ) -> int:
-    """Run (or resume, when `requests` is None) `job`. Returns 0, or raises Stop. The whole attempt is
-    logged live to runs/<run_id>.log.jsonl (ADR-0007), referenced from run.v1 `log_ref`."""
+    """Run (or resume, when `requests` is None) `job`. Returns 0, or raises Stop (recorded as run.v1
+    `stop`). The whole attempt is logged live to runs/<run_id>.log.jsonl (ADR-0007), referenced from
+    run.v1 `log_ref`. `postcheck(job, stop)` may turn an attempt that ended cleanly into a stop."""
     with runlog.attached(job.doc["run_id"]) as rel:
         job.doc["log_ref"] = rel
         # the first line of the log is the run card (written once the egress is known)
         try:
-            code = _run(job, source, handle, polite, requests, backend_opts, card_info)
+            code = _run(job, source, handle, polite, requests, backend_opts, card_info, postcheck)
         except Stop as s:
             runlog.LOG.warning(
                 "stopped (exit %s): %s",
@@ -1063,6 +1178,7 @@ def run(
                 s,
                 extra={"event": "stop", "code": s.code, "counts": job.doc.get("requests")},
             )
+            job.doc["stop"] = {"code": s.code, "reason": str(s) or f"exit {s.code}"}
             job.save()
             incidents.open_incident(s.code, str(s), job.doc["run_id"], job.doc["command"])
             raise

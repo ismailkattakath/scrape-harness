@@ -17,9 +17,10 @@ and stops (exit 3, resumable) unless the count is 0 or the operator passed `--<s
 it then runs with `--max-requests N` if it has that option. A paid_exempt step runs as declared.
 
 Ends. Complete: the approval is spent. TERMINAL (the approval is spent, the run cannot resume): a bound
-breach (a networked step's exit 3), a challenge or cooldown stop (5/6), the approval expiring, revoked, or
-`--abandon`. Every other failure (a crash, a count mismatch, an egress refusal (8), politeness (7), an
-unreachable site (12), an incomplete crawl (13)) is RESUMABLE: the next `<cli> refresh --approve-network`
+breach (a networked step's exit 3), a challenge or cooldown stop (5/6), a parse or yield stop (14: what the
+site sent cannot be trusted), the approval expiring, revoked, or `--abandon`. Every other failure (a crash,
+a count mismatch, a data folder refusal (4), an egress refusal (8), politeness (7), an unreachable site (12),
+an incomplete crawl (13)) is RESUMABLE: the next `<cli> refresh --approve-network`
 continues the same run id inside the same approval and TTL, skipping the steps it already completed.
 A site step's resume consumes its CEILING again (crawl-lists: 1 + max_pages; fetch-ads: its ads): only a
 refusal before any site request (6/7/8) refunds the first use. So a crash or 12/13 resumes only while the
@@ -60,7 +61,7 @@ from . import approvals, pipeline, store
 RUN_ID = re.compile(r"^refresh-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}$")
 DEFAULT_TTL = "12h"
 EXIT_NETWORK = 3
-TERMINAL_CODES = {5: "challenge stop", 6: "site cooldown"}
+TERMINAL_CODES = {5: "challenge stop", 6: "site cooldown", 14: "parse or yield stop"}
 REFETCH_REASONS = ("card_changed", "new", "stale_7d")  # plan.fetch_reason's values
 
 
