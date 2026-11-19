@@ -424,7 +424,7 @@
     "list": {
       "type": "object",
       "additionalProperties": false,
-      "description": "crawl-lists: what the list walk yielded. `status` other than ok is never a good crawl and never a reference crawl; every value but past_end and redirected is a terminal stop. Absent on runs before the field.",
+      "description": "crawl-lists: what the list walk yielded. `status` other than ok is never a good crawl and never a reference crawl (the walk modes widen this set, ADR-0017); the stop values (zero_yield, failed, blocked, parse_drift, end_unknown, short_census) are terminal. Absent on runs before the field.",
       "properties": {
         "status": {
           "enum": [
@@ -434,9 +434,24 @@
             "blocked",
             "parse_drift",
             "past_end",
-            "redirected"
+            "redirected",
+            "end",
+            "end_unknown",
+            "short_census",
+            "ceiling_hit",
+            "anchored",
+            "clamped"
           ],
-          "description": "ok: pages parsed with cards; zero_yield: a page gave 0 cards with no end marker; failed: a handler error; blocked: a challenge or refusal stopped it; parse_drift: too many cards skipped by the parser; past_end / redirected (an evidence run, --snapshot only): the run completed, but a list page answered 404/410, or ended at another URL, so its sightings are not trusted."
+          "description": "ok: pages parsed with cards; zero_yield: page 1 gave 0 cards with no positive END; failed: a handler error; blocked: a challenge or refusal stopped it; parse_drift: too many cards skipped by the parser; past_end / redirected (an evidence run, --snapshot only): the run completed, but a list page answered 404/410 without the end marker, or ended at another URL, so its sightings are not trusted; end: a list page positively ENDED the list (end_page); end_unknown: a page after page 1 gave 0 cards with no positive END, or carried the end marker on a page that is not an END (exit 14). Reserved for the walk modes (ADR-0017 A): short_census, ceiling_hit, anchored, clamped."
+        },
+        "end_page": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The lowest list page that positively ENDED the list: the source's end marker, 0 parsed cards, served at the URL asked for."
+        },
+        "end_method": {
+          "enum": ["end_marker", "clamped"],
+          "description": "How end_page was found: end_marker (the source's end_selectors). clamped is reserved for the stride-1 clamp guard."
         },
         "snapshot": {
           "type": "object",

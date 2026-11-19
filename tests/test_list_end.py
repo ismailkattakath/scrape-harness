@@ -1,0 +1,289 @@
+"""A positive END of a list (ADR-0017 A.1): a past-end list page is END only by the site's own marker.
+
+`Source.end_selectors` (optional, the twin of `gone_selectors`) names the site's "no results" template.
+`challenge.end_reason` admits the marker only on a page with no challenge sign: a clean page (reason None), a
+page that merely lacks the list expectation (EXPECTED_MISSING) or a 404/410 (GONE). The list handler then
+accepts END only with 0 parsed cards (skipped slots allowed) at the URL asked for. A page with 0 cards and no
+END is `end_unknown` (page 1: `zero_yield`), exit 14. Every test runs the offline fixture backend over
+SYNTHETIC pages and counts the GETs it actually served.
+"""
+
+import json
+
+import pytest
+from conftest import FIXTURES, LIST
+from example_site.source import ExampleSite
+from test_list_snapshots import body, crawl_lists, list_gets, sidecar
+from test_loud_failures import fixtures, run_docs
+
+from scrape_harness import challenge, contracts, crawl, store
+from scrape_harness.drivers.fixture import FixtureHttpClient
+from scrape_harness.interfaces import FetchResult, ListPage
+
+P1, P3, P400 = (f"{LIST}?page={n}" for n in (1, 3, 400))
+MARK = "#no-results"
+END_HTML = (
+    "<!doctype html><html><head><title>Not found | Example</title></head><body>"
+    '<div id="no-results">No widgets match</div></body></html>'
+)
+# a past-end page that still renders the site's promoted block: slots the parser skips, no card it reads
+PROMOTED_END = (
+    "<!doctype html><html><head><title>Not found | Example</title></head><body>"
+    '<main id="results"><article class="result promo"></article><article class="result promo"></article></main>'
+    '<div id="no-results">No widgets match</div></body></html>'
+)
+P3_WITH_MARK = (
+    (FIXTURES / "list-p3.html").read_text().replace("</body>", '<div id="no-results">x</div></body>')
+)
+EMPTY_WITH_MARK = (
+    "<!doctype html><html><head><title>Widgets | Example</title></head><body>"
+    '<main id="results"></main><div id="no-results">No widgets match</div></body></html>'
+)
+
+
+@pytest.fixture(autouse=True)
+def fresh_log():
+    FixtureHttpClient.log.clear()
+
+
+@pytest.fixture
+def marker(monkeypatch):
+    monkeypatch.setattr(ExampleSite, "end_selectors", (MARK,), raising=False)
+
+
+def res(status=200, html=END_HTML, final=None, headers=None, url=P400):
+    return FetchResult(url, status, final or url, html, headers or {})
+
+
+def events(kind):
+    return [e for e in store.read("events") if e["kind"] == kind]
+
+
+# ── the pure rule ──────────────────────────────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("reason", [None, *challenge.EXPECTED_MISSING, *challenge.GONE])
+def test_end_reason_admits_the_marker_on_a_page_with_no_challenge_sign(reason):
+    assert challenge.end_reason(res(), reason, (MARK,)) == "end_marker"
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ["http_403", "http_429", "http_503", "http_500", "cf_mitigated", "challenge_title", "captcha_iframe",
+     "challenge_marker", "login_redirect"],
+)  # fmt: skip
+def test_end_reason_never_admits_a_challenge_sign_or_another_error(reason):
+    assert challenge.end_reason(res(), reason, (MARK,)) is None
+
+
+def test_end_reason_needs_a_declared_selector_that_matches():
+    assert challenge.end_reason(res(), "http_404", ()) is None  # no end_selectors: the default
+    assert challenge.end_reason(res(), "http_404", ("#elsewhere",)) is None
+    assert challenge.end_reason(res(), "http_404", ("#elsewhere", MARK)) == "end_marker"
+
+
+def test_end_reason_ignores_the_sources_chrome():
+    assert challenge.end_reason(res(), None, (MARK,), ignore=(MARK,)) is None
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        res(403),  # a block status
+        res(200, headers={"cf-mitigated": "challenge"}),  # Cloudflare says it served a mitigation
+        res(404, END_HTML.replace("Not found | Example", "Just a moment...")),  # a challenge title
+        res(
+            404,
+            END_HTML.replace("</body>", '<script src="/cdn-cgi/challenge-platform/h/b/x"></script></body>'),
+        ),
+        res(404, END_HTML.replace("</body>", '<iframe src="https://hcaptcha.com/x"></iframe></body>')),
+    ],
+)
+def test_detect_then_end_reason_never_turns_a_challenge_into_an_end(page):
+    reason = challenge.detect(page, ExampleSite.expect["list"])
+    assert reason is not None and challenge.end_reason(page, reason, (MARK,)) is None
+
+
+# ── END on the default path (no --snapshot) ────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("status", [404, 410])
+def test_past_end_404_with_marker_is_end(data_dir, tmp_path, marker, status):
+    d = fixtures(tmp_path, {P400: {"file": "end.html", "status": status}}, [("end.html", END_HTML)])
+    assert crawl_lists(d, "--pages", "1,3,400") == 0
+    assert list_gets() == [P1, P3, P400]  # no retry of the END page
+    (doc,) = run_docs(data_dir)
+    contracts.validate("run.v1", doc)
+    assert doc["status"] == "completed" and doc["challenges"] == 0 and "stop" not in doc
+    assert doc["list"]["status"] == "end"
+    assert doc["list"]["end_page"] == 400 and doc["list"]["end_method"] == "end_marker"
+    assert not events("challenge") and not events("cooldown")
+    assert {o["list"]["page"] for o in store.read("observations")} == {1, 3}
+
+
+def test_past_end_promoted_slots_is_end(data_dir, tmp_path, marker, monkeypatch):
+    """R9: a past-end page may still render the promoted block. Slots the parser skips never make it drift,
+    and never stop the END: END is decided first."""
+    parse = ExampleSite.parse_list
+
+    def counting(self, html, **kw) -> ListPage:
+        lp = parse(self, html, **kw)
+        lp.skipped = html.count('class="result promo"')
+        return lp
+
+    monkeypatch.setattr(ExampleSite, "parse_list", counting)
+    d = fixtures(tmp_path, {P400: {"file": "end.html", "status": 404}}, [("end.html", PROMOTED_END)])
+    assert crawl_lists(d, "--pages", "1,400") == 0
+    (doc,) = run_docs(data_dir)
+    assert doc["list"]["status"] == "end" and doc["list"]["end_page"] == 400
+
+
+def test_a_200_page_with_the_marker_and_no_cards_is_end(data_dir, tmp_path, marker):
+    d = fixtures(tmp_path, {P400: "end.html"}, [("end.html", EMPTY_WITH_MARK)])
+    assert crawl_lists(d, "--pages", "1,400") == 0
+    (doc,) = run_docs(data_dir)
+    assert doc["list"]["status"] == "end" and doc["list"]["end_page"] == 400
+
+
+def test_an_empty_subcategory_is_an_end_on_page_one_not_a_zero_yield(data_dir, tmp_path, marker):
+    """Page 1 with 0 cards is legitimate only with a positive END. Its template has no pager, so it must be
+    END before the page-count check would call it parser drift."""
+    d = fixtures(tmp_path, {P1: {"file": "end.html", "status": 404}}, [("end.html", END_HTML)])
+    assert crawl_lists(d, "--stride", "2") == 0
+    assert list_gets() == [P1]
+    (doc,) = run_docs(data_dir)
+    assert doc["status"] == "completed" and doc["list"]["status"] == "end"
+    assert doc["list"]["end_page"] == 1 and doc["list"]["observations_written"] == 0
+
+
+# ── what is NOT an END ─────────────────────────────────────────────────────────────────────────────────
+def test_a_404_without_the_marker_is_still_a_challenge_stop(data_dir, tmp_path, marker):
+    bare = END_HTML.replace('id="no-results"', 'id="other"')
+    d = fixtures(tmp_path, {P400: {"file": "bare.html", "status": 404}}, [("bare.html", bare)])
+    assert crawl_lists(d, "--pages", "1,400,3") == crawl.EXIT_CHALLENGE
+    assert list_gets() == [P1, P400]
+    (doc,) = run_docs(data_dir)
+    assert doc["challenges"] == 1 and "end_page" not in doc["list"]
+
+
+def test_without_end_selectors_a_marked_404_is_still_a_challenge_stop(data_dir, tmp_path):
+    d = fixtures(tmp_path, {P400: {"file": "end.html", "status": 404}}, [("end.html", END_HTML)])
+    assert crawl_lists(d, "--pages", "1,400,3") == crawl.EXIT_CHALLENGE
+    assert list_gets() == [P1, P400]
+
+
+def test_a_200_page_with_the_marker_and_cards_is_a_normal_page(data_dir, tmp_path, marker):
+    d = fixtures(tmp_path, {P3: "p3.html"}, [("p3.html", P3_WITH_MARK)])
+    assert crawl_lists(d, "--pages", "1,3") == 0
+    (doc,) = run_docs(data_dir)
+    assert doc["list"]["status"] == "ok" and "end_page" not in doc["list"]
+    assert {o["list"]["page"] for o in store.read("observations")} == {1, 3}
+
+
+def test_a_404_with_the_marker_and_cards_stops_and_keeps_none_of_its_cards(data_dir, tmp_path, marker):
+    """Fail closed: a 404 used to stop the run. A marker that does not make it an END never lets its cards in."""
+    d = fixtures(tmp_path, {P3: {"file": "p3.html", "status": 404}}, [("p3.html", P3_WITH_MARK)])
+    assert crawl_lists(d, "--pages", "1,3,400") == crawl.EXIT_PARSE
+    assert list_gets() == [P1, P3]
+    (doc,) = run_docs(data_dir)
+    assert doc["status"] == "stopped" and doc["list"]["status"] == "end_unknown"
+    assert {o["list"]["page"] for o in store.read("observations")} == {1}  # page 1's rows are kept
+
+
+@pytest.mark.parametrize("status", [200, 404])
+def test_redirect_to_page1_with_the_marker_is_not_end(data_dir, tmp_path, marker, status):
+    d = fixtures(tmp_path, {P400: {"file": "end.html", "status": status, "final_url": P1}},
+                 [("end.html", EMPTY_WITH_MARK)])  # fmt: skip
+    assert crawl_lists(d, "--pages", "1,400,3") == crawl.EXIT_PARSE
+    assert list_gets() == [P1, P400]
+    (doc,) = run_docs(data_dir)
+    assert doc["list"]["status"] == "end_unknown" and "end_page" not in doc["list"]
+    assert doc["stop"]["code"] == crawl.EXIT_PARSE
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"file": "end.html", "status": 403},
+        {"file": "end.html", "status": 200, "headers": {"cf-mitigated": "challenge"}},
+        {"file": "chl.html", "status": 404},
+    ],
+)
+def test_end_marker_never_hides_challenge(data_dir, tmp_path, marker, entry):
+    chl = END_HTML.replace("</body>", '<script src="/cdn-cgi/challenge-platform/h/b/x"></script></body>')
+    d = fixtures(tmp_path, {P400: entry}, [("end.html", END_HTML), ("chl.html", chl)])
+    assert crawl_lists(d, "--pages", "1,400,3") == crawl.EXIT_CHALLENGE
+    assert list_gets() == [P1, P400]
+    (doc,) = run_docs(data_dir)
+    assert doc["challenges"] == 1 and "end_page" not in doc["list"]
+
+
+def test_a_page_with_no_cards_past_page_one_is_end_unknown(data_dir, tmp_path):
+    empty = EMPTY_WITH_MARK.replace('<div id="no-results">No widgets match</div>', "")
+    d = fixtures(tmp_path, {P3: "empty.html"}, [("empty.html", empty)])
+    assert crawl_lists(d, "--pages", "1,3") == crawl.EXIT_PARSE
+    (doc,) = run_docs(data_dir)
+    assert doc["status"] == "stopped" and doc["list"]["status"] == "end_unknown"
+    assert doc["list"]["observations_written"] == 3  # rows are kept: page 1 was read
+    from scrape_harness import incidents
+
+    assert [i["kind"] for i in incidents.open_ones()] == ["parse"]
+
+
+# ── --snapshot agrees with the default path ────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("status", [404, 410])
+def test_a_snapshot_run_reads_a_marked_404_as_end(data_dir, tmp_path, marker, status):
+    d = fixtures(tmp_path, {P400: {"file": "end.html", "status": status}}, [("end.html", END_HTML)])
+    assert crawl_lists(d, "--pages", "1,3,400", "--snapshot") == 0
+    assert list_gets() == [P1, P3, P400]
+    (doc,) = run_docs(data_dir)
+    rid = doc["run_id"]
+    contracts.validate("run.v1", doc)
+    assert doc["list"]["status"] == "end" and doc["list"]["end_page"] == 400
+    assert doc["list"]["snapshot"]["past_end"] == [400]  # the page's own outcome stays past_end
+    s = sidecar(data_dir, rid, 400)
+    assert s["outcome"] == "past_end" and s["parsed"] == 0 and s["reason"] == f"http_{status}"
+    assert body(data_dir, rid, 400) == END_HTML
+
+
+def test_a_snapshot_run_keeps_a_bare_404_as_evidence(data_dir, tmp_path, marker):
+    bare = END_HTML.replace('id="no-results"', 'id="other"')
+    d = fixtures(tmp_path, {P400: {"file": "bare.html", "status": 404}}, [("bare.html", bare)])
+    assert crawl_lists(d, "--pages", "1,400", "--snapshot") == 0
+    (doc,) = run_docs(data_dir)
+    assert doc["list"]["status"] == "past_end" and "end_page" not in doc["list"]
+
+
+def test_a_snapshot_run_with_an_end_and_a_bare_404_is_evidence_not_an_end(data_dir, tmp_path, marker):
+    bare = END_HTML.replace('id="no-results"', 'id="other"')
+    p401 = f"{LIST}?page=401"
+    d = fixtures(tmp_path, {P400: {"file": "end.html", "status": 404}, p401: {"file": "bare.html", "status": 404}},
+                 [("end.html", END_HTML), ("bare.html", bare)])  # fmt: skip
+    assert crawl_lists(d, "--pages", "1,400,401", "--snapshot") == 0
+    (doc,) = run_docs(data_dir)
+    assert doc["list"]["status"] == "past_end" and doc["list"]["end_page"] == 400
+
+
+def test_a_snapshot_run_with_a_redirected_marked_page_keeps_it_as_redirected(data_dir, tmp_path, marker):
+    d = fixtures(tmp_path, {P400: {"file": "end.html", "final_url": P1}}, [("end.html", EMPTY_WITH_MARK)])
+    assert crawl_lists(d, "--pages", "1,400", "--snapshot") == 0
+    (doc,) = run_docs(data_dir)
+    assert doc["list"]["status"] == "redirected" and "end_page" not in doc["list"]
+
+
+# ── contracts ──────────────────────────────────────────────────────────────────────────────────────────
+@pytest.mark.parametrize(
+    "status", ["end", "end_unknown", "short_census", "ceiling_hit", "anchored", "clamped"]
+)
+def test_the_walk_list_statuses_validate(status):
+    run = json.loads(
+        (FIXTURES.parent.parent / "schemas" / "examples" / "run.list-stop.example.json").read_text()
+    )
+    contracts.validate("run.v1", run | {"list": {"status": status, "observations_written": 0}})
+
+
+def test_end_page_and_method_validate_and_are_closed():
+    run = json.loads(
+        (FIXTURES.parent.parent / "schemas" / "examples" / "run.list-stop.example.json").read_text()
+    )
+    lst = {"status": "end", "observations_written": 3, "end_page": 4, "end_method": "end_marker"}
+    contracts.validate("run.v1", run | {"list": lst})
+    for bad in ({"end_page": 0}, {"end_method": "guess"}):
+        with pytest.raises(contracts.ContractError):
+            contracts.validate("run.v1", run | {"list": lst | bad})

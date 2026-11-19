@@ -81,6 +81,22 @@ def list_handler(job: crawl.Run, source, max_pages: int):
         if m.get("snapshot"):  # the counts, before any stop below: the sidecar was saved before the parse
             store.update_list_sidecar(source.site, job.doc["run_id"], m["page"], parsed=len(lp.observations),
                                       skipped=getattr(lp, "skipped", None))  # fmt: skip
+        # A positive END (ADR-0017 A.1), decided FIRST: before the page-count check (a past-end template has no
+        # pager) and before any drift guard (a past-end page may still render promoted slots the parser skips).
+        lst = job.doc.setdefault("list", {})
+        if m.get("end_marker") and not lp.observations and not crawl.redirected(res):
+            if lst.get("end_page") is None or m["page"] < lst["end_page"]:
+                lst["end_page"], lst["end_method"] = m["page"], "end_marker"
+            return []
+        if m.get("end_marker") and m.get("reason"):  # it would have stopped the run: none of it is kept
+            lst["status"] = "end_unknown"
+            raise crawl.Stop(crawl.EXIT_PARSE, f"STOPPED: end_unknown: list page {m['page']} carries the end "
+                             f"marker ({m['reason']}) but is not an END (" + ("served at another URL"
+                             if crawl.redirected(res) else f"{len(lp.observations)} cards") + ")")  # fmt: skip
+        if not lp.observations:  # 0 cards and no positive END: the list's end is unknown, or the parser broke
+            lst["status"] = "zero_yield" if m["page"] == 1 else "end_unknown"
+            raise crawl.Stop(crawl.EXIT_PARSE, f"STOPPED: {lst['status']}: list page {m['page']} gave 0 cards "
+                             "and no end marker")  # fmt: skip
         new: list[dict] = []
         weight = m.get("sample_weight")
         page_count = m.get("page_count") or lp.page_count
@@ -133,18 +149,23 @@ def list_outcome(job: crawl.Run, stop: crawl.Stop | None) -> crawl.Stop | None:
     if stop is not None:
         return None
     snap = lst.get("snapshot") or {}
-    unlisted = len(snap.get("past_end", ())) + len(snap.get("redirected", ()))
+    end = lst.get("end_page")
+    # an END page is saved as past_end (it answered 404/410) and was handed to the parser; a bare past-end page
+    # (no end marker) is evidence only
+    bare = [p for p in snap.get("past_end", ()) if p != end]
+    unlisted = len(bare) + len(snap.get("redirected", ()))
     # pages that were only past-end or redirected wrote no rows by design; any page handed to the parser
-    # (listed) that left no row is still a zero yield
-    if n == 0 and job.doc.get("requests", {}).get("list_pages", 0) > 0 and snap.get("saved", 1) > unlisted:
+    # (listed) that left no row is still a zero yield, unless the list positively ENDED (an empty subcategory)
+    if (n == 0 and end is None and job.doc.get("requests", {}).get("list_pages", 0) > 0
+            and snap.get("saved", 1) > unlisted):  # fmt: skip
         lst["status"] = "zero_yield"
         job.doc["status"] = "stopped"
         return crawl.Stop(crawl.EXIT_PARSE, f"STOPPED: zero yield: {job.doc['requests']['list_pages']} list "
                           "page requests and no observation written (no cards, or the parser drifted)")  # fmt: skip
     if unlisted:  # an evidence run: completed, never a good crawl (liveness.good_crawl allows only ok)
-        lst["status"] = "past_end" if snap.get("past_end") else "redirected"
+        lst["status"] = "past_end" if bare else "redirected"
         return None
-    lst["status"] = "ok"
+    lst["status"] = "end" if end is not None else "ok"
     return None
 
 
@@ -1033,7 +1054,8 @@ def cmd_crawl_correct(args: argparse.Namespace) -> int:
 def cmd_crawl_resume(args: argparse.Namespace) -> int:
     job = crawl.Run.load(args.run_id)
     stop, lst = job.doc.get("stop") or {}, job.doc.get("list") or {}
-    if stop.get("code") == crawl.EXIT_PARSE or lst.get("status") in ("zero_yield", "parse_drift"):
+    terminal = ("zero_yield", "parse_drift", "end_unknown")
+    if stop.get("code") == crawl.EXIT_PARSE or lst.get("status") in terminal:
         # its stopping request is DONE: a resume would drain to `completed` and pass for a reference crawl
         print(f"refusing: run {job.doc['run_id']} stopped terminally (exit {crawl.EXIT_PARSE}: "
               f"{stop.get('reason') or lst.get('status')}); plan a new run instead", file=sys.stderr)  # fmt: skip

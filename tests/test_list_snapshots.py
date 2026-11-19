@@ -146,8 +146,10 @@ def test_listed_pages_with_no_rows_are_still_a_zero_yield_beside_a_past_end_page
     d = fixtures(tmp_path, {P1: "empty.html", P400: {"file": "empty.html", "status": 404}},
                  [("empty.html", empty)])  # fmt: skip
     assert crawl_lists(d, "--pages", "1,400", "--snapshot") == crawl.EXIT_PARSE
+    # page 1's 0 cards (no end marker) stop the run at once (ADR-0017 A.1): page 400 is never sent
+    assert list_gets() == [P1]
     (doc,) = run_docs(data_dir)
-    assert doc["list"]["status"] == "zero_yield" and doc["list"]["snapshot"]["past_end"] == [400]
+    assert doc["list"]["status"] == "zero_yield" and doc["list"]["snapshot"]["past_end"] == []
 
 
 def test_only_past_end_pages_complete_without_a_zero_yield(data_dir, tmp_path):

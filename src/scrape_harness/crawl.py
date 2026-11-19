@@ -357,6 +357,12 @@ def _served_at(res: FetchResult, final: bool = True) -> tuple:
     return (u.scheme.lower(), (u.hostname or "").lower(), port, u.path or "/", u.query)
 
 
+def redirected(res: FetchResult) -> bool:
+    """A list page served at another URL than the one asked for (`_served_at`): its cards are not that page's.
+    The one check for list snapshots and for a positive END (ADR-0017 A.1)."""
+    return _served_at(res) != _served_at(res, final=False)
+
+
 def _challenge(job: Run, url: str, reason: str, res: FetchResult | None = None, hops=None) -> Stop:
     rid, site = job.doc["run_id"], job.doc["source"]
     job.doc["challenges"] += 1
@@ -790,6 +796,7 @@ async def _crawl(
     hops: dict[str, int] = {}  # main-frame redirects per page navigation (browser only)
     ignore = tuple(getattr(source, "ignore_selectors", ()))
     gone_selectors = tuple(getattr(source, "gone_selectors", ()))  # the source's "ad no longer active" page
+    end_selectors = tuple(getattr(source, "end_selectors", ()))  # its "no results" list page (an END)
     blocks = variants.get(job.doc["variant"]).blocks
     block = browser.block_extensions() if blocks else ()
     site_host = (urlsplit(source.robots_url).hostname or "").removeprefix("www.")
@@ -997,7 +1004,7 @@ async def _crawl(
         outcome = (
             "past_end" if reason in challenge.GONE
             else "stopped" if reason
-            else "redirected" if _served_at(res) != _served_at(res, final=False)
+            else "redirected" if redirected(res)
             else "listed"
         )  # fmt: skip
         page, keep = int(m["page"]), reason is None or reason in challenge.GONE + challenge.EXPECTED_MISSING
@@ -1045,9 +1052,18 @@ async def _crawl(
         attempts.done(ctx.request.unique_key)
         kind = ctx.request.user_data.get("kind", "list")
         reason = challenge.detect(res, source.expect.get(kind), ignore)
+        # A positive END nominee (ADR-0017 A.1): the source's "no results" marker on a list page with no
+        # challenge sign. The list handler, which has the card counts, accepts or refuses it; the challenge
+        # branch below is skipped for it, so a past-end 404 is not a stop. Both paths (with and without
+        # --snapshot) hand it to the handler alike. Only crawl-lists' handler decides an END, so only its runs
+        # (`walk`) nominate one: any other list reader (ab) stops on such a page as before.
+        nominee = (
+            challenge.end_reason(res, reason, end_selectors, ignore) if kind == "list" and walk else None
+        )
+        end = nominee == "end_marker"
         if kind == "list" and ctx.request.user_data.get("snapshot"):
             outcome = snapshot(ctx.request.user_data, res, reason)
-            if outcome in ("past_end", "redirected"):  # recorded, never a challenge stop and never rows
+            if outcome == "redirected" or (outcome == "past_end" and not end):  # recorded: no stop, no rows
                 counted(ctx.request.user_data, res)
                 job.save()
                 runlog.LOG.info("list page %s %s (%s), saved", ctx.request.user_data.get("page"), outcome,
@@ -1073,13 +1089,14 @@ async def _crawl(
             runlog.LOG.info("gone %s (%s%s)", urlsplit(ctx.request.url).path, gone, at,
                             extra={"event": "gone", "reason": gone})  # fmt: skip
             return
-        if reason:
+        if reason and not end:
             stopped.append(_challenge(job, ctx.request.url, reason, res, n_hops))
             crawler.stop(f"challenge: {reason}")
             raise ChallengeDetected(reason)  # crawlee reclaims the request: it stays pending for resume
+        meta = dict(ctx.request.user_data) | ({"end_marker": True, "reason": reason} if end else {})
         # Order matters: a refused write (re-raised to `refused`) or a Stop is never a parse failure.
         try:
-            new = handle(dict(ctx.request.user_data), res)
+            new = handle(meta, res)
         except (store.DataDirError, OSError):
             raise
         except Stop as s:  # terminal: this request is DONE, so a resume could never read it again

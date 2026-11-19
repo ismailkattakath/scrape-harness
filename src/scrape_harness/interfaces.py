@@ -76,6 +76,10 @@ class Source(Protocol):
     # ignore_selectors: tuple[str, ...]
     # optional: selectors of the site's own "this ad is no longer active" page (a soft 404): gone, not a stop
     # gone_selectors: tuple[str, ...]
+    # optional: selectors of the site's own "no results" template on a list page past the last one (a positive
+    # END, ADR-0017 A.1); a 404/410 or 200 list page carrying it, with 0 cards at the URL asked for, ends the
+    # list. Without it a past-end page is never an END (fail closed). Prove it on a saved past-end page.
+    # end_selectors: tuple[str, ...]
     default_variant: dict[str, str]  # page kind -> variant name (variants.py), i.e. the fetch backend
     coverage_fields: tuple[str, ...]  # dotted paths into observation.v1 the A/B report measures
 

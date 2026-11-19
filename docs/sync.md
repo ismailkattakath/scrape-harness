@@ -36,6 +36,8 @@ the gate, with 0 GETs. It opens a `parse` incident. A breaker trip opens a
 |---|---|---|
 | A list handler raised (a contract error or a parser crash) | 14 | `list.status: failed` |
 | Page 1 named no page count | 14 | `list.status: parse_drift` |
+| Page 1 gave 0 cards with no positive END | 14 | `list.status: zero_yield` |
+| A later page gave 0 cards with no positive END, or carried the end marker but is not an END | 14 | `list.status: end_unknown` |
 | List pages answered, but 0 observations were written | 14 | `list.status: zero_yield` |
 | A list page failed after its retries | 13 (resumable) | `list.status: failed` |
 | A list page was disallowed by robots.txt | 13 | `list.status: blocked` |
@@ -217,7 +219,7 @@ step after it.
 
 The first piece of slice 2. It lets the operator take ONE approved run of a
 redesigned list: page 1, page 2 and a past-end page, with 0 ad views. Walk
-modes, positive END and anchors are not built yet.
+modes and anchors are not built yet; positive END is (below).
 
 ```
 <cli> crawl-lists --subcategory X --pages 1,2,400 --snapshot --plan
@@ -264,6 +266,48 @@ differ from the request in exactly these.
 
 **A refused write** (the data folder, a full disk) takes slice 1's path: exit 4,
 the list page handed back for the resume, no retry GET.
+
+## Positive END of a list
+
+A list ends only when the site **says** it ended. Absence is never an end: a
+broken card selector also gives 0 cards.
+
+- **The plug-in declares it.** `Source.end_selectors` (optional, the twin of
+  `gone_selectors`) names the site's own "no results" template. Prove it on a
+  saved past-end page, with its sidecar `{status, final_url}`: HTML alone
+  cannot prove the status or the missing redirect.
+- **The nominee.** `challenge.end_reason(res, reason, end_selectors, ignore)`
+  is pure. It returns `end_marker` only when a selector matches AND
+  `challenge.detect` found no challenge sign: a clean page, a page that only
+  lacks the list expectation, or a 404/410. Every challenge sign (403/429/503,
+  cf-mitigated, a challenge title, a corroborated marker or captcha, a login
+  redirect) returns first, so it still stops the run with exit 5.
+- **The seam.** In crawl-lists runs, a nominated list page skips the challenge
+  stop and goes to the list handler, with and without `--snapshot`.
+- **The handler decides, END first.** END needs the marker, **0 parsed cards**
+  (skipped promoted slots are allowed) and the page **served at the URL asked
+  for** (`crawl.redirected`, the same check the snapshots use). It is decided
+  before the page-count check and any drift guard: a past-end template has no
+  pager, and it may still render a promoted block.
+
+| The page | Result |
+|---|---|
+| Marker, 0 cards, no redirect (200, 404 or 410) | **END**: `list.end_page`, `list.end_method: end_marker`; the run ends `list.status: end` |
+| Page 1 is that END | an empty subcategory: `end`, 0 observations, exit 0 |
+| Marker and cards on a 200 page | a normal page: rows kept |
+| Marker on a 404/410 or `unexpected_page` that is not an END (cards, or a redirect) | `end_unknown`, exit 14; none of its cards are kept |
+| Marker, 0 cards, at another URL (200) | `end_unknown` (page 1: `zero_yield`), exit 14 |
+| 0 cards, no marker | page 1: `zero_yield`; later pages: `end_unknown`; exit 14, earlier rows kept |
+| 404/410 without the marker | as before: exit 5 without `--snapshot`, `past_end` evidence with it |
+
+**With `--snapshot`** the END page keeps its own outcome (`past_end` for a
+404/410) and is also the run's `end_page`. A run with an END and no bare
+past-end or redirected page records `end`; one bare past-end page still makes
+it an evidence run (`past_end`).
+
+**Not yet a good crawl.** `liveness.good_crawl` and the refresh postcondition
+still accept only `ok`. So an `end` run is fail-closed, like `past_end`: its
+sightings feed no gate until the walk modes widen the good set.
 
 ## Known gaps in slice 1
 

@@ -35,7 +35,7 @@
     },
     "outcome": {
       "enum": ["listed", "past_end", "redirected", "stopped"],
-      "description": "listed: handed to the list parser, rows kept; past_end: answered 404/410, saved and recorded, not a challenge; redirected: final_url differs from requested_url, saved, its cards counted but not kept; stopped: a challenge stop (exit 5), as without snapshots."
+      "description": "listed: handed to the list parser, rows kept; past_end: answered 404/410, saved and recorded, not a challenge (with the source's end marker, 0 cards and no redirect it is also the run's positive END, list.end_page); redirected: final_url differs from requested_url, saved, its cards counted but not kept; stopped: a challenge stop (exit 5), as without snapshots."
     },
     "parsed": {
       "type": ["integer", "null"],

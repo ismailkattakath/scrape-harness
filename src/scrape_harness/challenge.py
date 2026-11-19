@@ -149,6 +149,20 @@ def gone_reason(
 GONE = ("http_404", "http_410")
 
 
+def end_reason(r: FetchResult, reason: str | None, end_selectors=(), ignore=()) -> str | None:
+    """`end_marker` when a LIST page carries the source's own "no results" template (end_selectors) on a page
+    with no challenge sign, else None. The twin of gone_reason: it admits a clean page (None), one that merely
+    lacks the list expectation (EXPECTED_MISSING) and a 404/410 (GONE), because detect() returns http_4xx
+    before the expectation check, so a past-end 404 with the marker would otherwise be a challenge stop.
+    Every challenge sign (a block status, a login redirect, cf-mitigated, a challenge title, corroborated
+    markers or captcha) returns from detect() before GONE, so it is never an end. The marker only nominates
+    the page: the list handler accepts END (0 cards, no redirect) or refuses it (ADR-0017 A.1)."""
+    if not end_selectors or not (reason is None or reason in EXPECTED_MISSING or reason in GONE):
+        return None
+    doc = _doc(r, ignore)
+    return "end_marker" if any(doc.select_one(s) for s in end_selectors) else None
+
+
 def gone(reason: str | None, revisit: bool) -> bool:
     """A REVISIT of a known ad that answers 404/410 with no challenge sign is a removed page ("gone"),
     not a challenge. detect() reaches a bare http_404/http_410 only after the captcha-iframe and

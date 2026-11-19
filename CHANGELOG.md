@@ -23,6 +23,16 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   discovery. Signed in the plan and in a refresh's list set (only when set, so
   older plans hash as before); bounded by `--max-pages`; refused with
   `--stride`, `--start`, `--seed` or `--page-count`.
+- Positive END of a list (ADR-0017 A.1): optional `Source.end_selectors`,
+  pure `challenge.end_reason`, and a seam in the crawl that hands a list page
+  carrying the site's "no results" marker (on a clean page or a 404/410, never
+  on a challenge sign) to the list handler. It is END only with 0 parsed cards
+  at the URL asked for: `list.status: end`, `list.end_page`,
+  `list.end_method`. A 0-card page with no END stops with exit 14 at once:
+  `zero_yield` on page 1, `end_unknown` after it. run.v1 `list.status` gains
+  `end`, `end_unknown` and the reserved walk values `short_census`,
+  `ceiling_hit`, `anchored`, `clamped`. See "Positive END" in
+  [docs/sync.md](docs/sync.md).
 - `ListPage.skipped` (optional): cards the parser could not read.
 - Exit 14 (`crawl.EXIT_PARSE`): a parse or yield stop, terminal, with a
   `parse` incident (and `gone_storm` for a breaker trip).
