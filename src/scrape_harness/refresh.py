@@ -222,8 +222,11 @@ def build_bounds(ttl: str = DEFAULT_TTL, max_ad_requests: int | None = None) -> 
             v = cli._variant(ns, source, "list")  # noqa: SLF001
             if cli._networked(ns, [v]):  # noqa: SLF001
                 cli._deterministic(ns)  # noqa: SLF001 - the signed sample is the one crawled
-            lists.append({k: getattr(ns, k) for k in approvals.LIST_KEYS})  # one signed set per step
-            if ns.page_count:
+            cli._check_pages(ns)  # noqa: SLF001
+            lists.append(approvals.list_args(ns))  # one signed set per step
+            if ns.pages:
+                max_lists += len(ns.pages)
+            elif ns.page_count:
                 _, pages = plan.systematic_pages(ns.page_count, ns.stride, ns.start, ns.seed)
                 max_lists += min(len(pages), ns.max_pages)
             else:

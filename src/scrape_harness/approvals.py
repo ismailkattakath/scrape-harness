@@ -714,6 +714,15 @@ def consume_standing(
 MAX_BOUNDED = timedelta(hours=24)
 BOUNDED_TIMES = ("not_before", "expires_at")
 LIST_KEYS = ("subcategory", "region", "page_count", "stride", "start", "seed", "max_pages")
+# Signed only when set (explicit pages, list snapshots): a set signed before they existed reads the same.
+LIST_KEYS_IF_SET = ("pages", "snapshot")
+
+
+def list_args(x) -> dict:
+    """One crawl-lists argument set, as the bounds sign it: LIST_KEYS always, LIST_KEYS_IF_SET when set.
+    `x` is a dict (a step's plan doc) or an argparse namespace (a refresh step's parsed arguments)."""
+    get = x.get if isinstance(x, dict) else (lambda k: getattr(x, k, None))
+    return {k: get(k) for k in LIST_KEYS} | {k: get(k) for k in LIST_KEYS_IF_SET if get(k)}
 
 
 def signed_lists(b: dict) -> list[dict]:
@@ -732,11 +741,16 @@ def _list_words(x: dict) -> str:
         else f"every {x.get('stride')}th page, start {x.get('start')}, seed {x.get('seed')}"
     )
     pages = (
-        f"of its {x['page_count']} pages, at most {x.get('max_pages')}"
+        f"pages {', '.join(map(str, x['pages']))}, exactly"
+        if x.get("pages")
+        else f"of its {x['page_count']} pages, at most {x.get('max_pages')}"
         if x.get("page_count")
         else f"page 1, then at most {x.get('max_pages')} more pages"
     )
-    return f"{x.get('subcategory')} in {x.get('region')} ({how}; {pages})"
+    if x.get("pages"):
+        how = "named pages"
+    snap = "; list snapshots saved, a 404/410 page recorded instead of stopping" if x.get("snapshot") else ""
+    return f"{x.get('subcategory')} in {x.get('region')} ({how}; {pages}{snap})"
 
 
 def bounded_text(b: dict) -> str:
@@ -942,9 +956,9 @@ def consume_bounded(
     reasons = sorted(set(step_doc.get("fetch_reasons") or []))
     list_set, list_checks = None, []
     if step_doc.get("command") == "crawl-lists":  # its args must be one signed set this run has not crawled
-        args = {k: step_doc.get(k) for k in LIST_KEYS}
+        args = list_args(step_doc)
         sets, done = signed_lists(b), consumed_sets(aid, refresh_run_id, ledger)
-        match = [i for i, x in enumerate(sets) if x == args]
+        match = [i for i, x in enumerate(sets) if list_args(x) == args]
         free = [i for i in match if done.get(i, 0) <= 0]
         list_set = free[0] if free else None
         list_checks = [

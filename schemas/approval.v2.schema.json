@@ -507,6 +507,20 @@
         "max_pages": {
           "type": "integer",
           "minimum": 0
+        },
+        "pages": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "crawl-lists --pages: exactly these list pages, in this order (no page-count discovery). Absent when not set."
+        },
+        "snapshot": {
+          "const": true,
+          "description": "crawl-lists --snapshot: each answered list page is saved, and a 404/410 list page is recorded instead of stopping the run. Absent when not set."
         }
       }
     }

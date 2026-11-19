@@ -1,0 +1,19 @@
+{
+  "schema": "list_snapshot.v1",
+  "site": "example.invalid",
+  "crawl_id": "2026-11-19T12:00:00Z-crawl-lists-desktop-a1b2c3",
+  "page": 400,
+  "requested_url": "https://www.example.invalid/listings/widgets/sample-region?page=400",
+  "final_url": "https://www.example.invalid/listings/widgets/sample-region?page=400",
+  "status": 404,
+  "fetched_at": "2026-11-19T12:00:09Z",
+  "reason": "http_404",
+  "outcome": "past_end",
+  "parsed": 0,
+  "skipped": null,
+  "body": {
+    "path": "raw/lists/example.invalid/2026-11-19T12_00_00Z-crawl-lists-desktop-a1b2c3/400.html.gz",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "bytes": 120
+  }
+}

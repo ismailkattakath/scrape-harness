@@ -1,0 +1,15 @@
+{
+  "schema": "list_snapshot.v1",
+  "site": "example.invalid",
+  "crawl_id": "2026-11-19T12:00:00Z-crawl-lists-desktop-a1b2c3",
+  "page": 3,
+  "requested_url": "https://www.example.invalid/listings/widgets/sample-region?page=3",
+  "final_url": "https://www.example.invalid/listings/widgets/sample-region?page=3",
+  "status": 403,
+  "fetched_at": "2026-11-19T12:00:09Z",
+  "reason": "http_403",
+  "outcome": "end",
+  "parsed": null,
+  "skipped": null,
+  "body": null
+}

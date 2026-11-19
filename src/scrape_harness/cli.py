@@ -78,6 +78,9 @@ def list_handler(job: crawl.Run, source, max_pages: int):
         lp = source.parse_list(
             res.html, url=res.url, subcategory=m["subcategory"], page=m["page"], seen_at=utcnow()
         )
+        if m.get("snapshot"):  # the counts, before any stop below: the sidecar was saved before the parse
+            store.update_list_sidecar(source.site, job.doc["run_id"], m["page"], parsed=len(lp.observations),
+                                      skipped=getattr(lp, "skipped", None))  # fmt: skip
         new: list[dict] = []
         weight = m.get("sample_weight")
         page_count = m.get("page_count") or lp.page_count
@@ -128,6 +131,10 @@ def list_outcome(job: crawl.Run, stop: crawl.Stop | None) -> crawl.Stop | None:
     lst = job.doc.setdefault("list", {})
     lst["observations_written"] = n
     if stop is not None:
+        return None
+    snap = lst.get("snapshot") or {}
+    if snap.get("past_end") or snap.get("redirected"):  # an evidence run: completed, never a good crawl
+        lst["status"] = "past_end" if snap.get("past_end") else "redirected"
         return None
     if n == 0 and job.doc.get("requests", {}).get("list_pages", 0) > 0:
         lst["status"] = "zero_yield"
@@ -324,6 +331,8 @@ def _planned_from(plan_doc: dict) -> dict:
     if cmd == "crawl resume" and plan_doc.get("pending") is not None:
         kind = "ad" if plan_doc.get("resumes") == "fetch-ads" else "list"
         return {kind: plan_doc["pending"], "robots": 1}
+    if cmd == "crawl-lists" and plan_doc.get("pages"):
+        return {"list": len(plan_doc["pages"]), "robots": 1}
     if cmd == "crawl-lists" and plan_doc.get("page_count"):
         _, pages = plan.systematic_pages(
             plan_doc["page_count"], plan_doc["stride"], plan_doc.get("start"), plan_doc.get("seed")
@@ -337,7 +346,7 @@ def _step_doc(plan_doc: dict) -> dict:
     if plan_doc["command"] == "crawl-lists":
         lp = (
             _planned_from(plan_doc).get("list", 0)
-            if plan_doc.get("page_count")
+            if plan_doc.get("page_count") or plan_doc.get("pages")
             else 1 + plan_doc["max_pages"]  # page 1, then at most max_pages of the sample it plans
         )
         return plan_doc | {"list_pages": lp, "ad_requests": 0, "fetch_reasons": []}
@@ -400,10 +409,35 @@ def _deterministic(args: argparse.Namespace) -> None:
         )
 
 
+def page_list(text: str) -> list[int]:
+    """--pages 1,2,400: positive page numbers, each once, in the order given."""
+    try:
+        pages = [int(p) for p in text.split(",")]
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"--pages {text!r}: comma-separated page numbers") from None
+    if not pages or min(pages) < 1 or len(set(pages)) != len(pages):
+        raise argparse.ArgumentTypeError(f"--pages {text!r}: page numbers >= 1, each named once")
+    return pages
+
+
+def _check_pages(args: argparse.Namespace) -> None:
+    """--pages reads exactly the named pages: no page-count discovery and no sample, so the sample's options
+    are refused with it (never silently ignored), and the pages count toward --max-pages (never truncated)."""
+    if not getattr(args, "pages", None):
+        return
+    clash = [f for f, on in (("--stride", args.stride != 1), ("--start", args.start is not None),
+             ("--seed", args.seed is not None), ("--page-count", args.page_count is not None)) if on]  # fmt: skip
+    if clash:
+        raise SystemExit(f"--pages names its pages: it cannot take {', '.join(clash)}")
+    if len(args.pages) > args.max_pages:
+        raise SystemExit(f"--pages names {len(args.pages)} pages, more than --max-pages {args.max_pages}")
+
+
 def cmd_crawl_lists(args: argparse.Namespace) -> int:
     source = load("sources", args.source)
     variant = _variant(args, source, "list")
     _polite(args)
+    _check_pages(args)
     _refresh_step(args)
     if _networked(args, [variant]):
         _deterministic(args)
@@ -421,6 +455,9 @@ def cmd_crawl_lists(args: argparse.Namespace) -> int:
             start=args.start,
             seed=args.seed,
             max_pages=args.max_pages,
+            # signed only when set, so every plan without them hashes as before
+            **({"pages": args.pages} if args.pages else {}),
+            **({"snapshot": True} if args.snapshot else {}),
         ),
         [variant],
     )
@@ -433,8 +470,18 @@ def cmd_crawl_lists(args: argparse.Namespace) -> int:
         "stride": args.stride,
         "start": args.start,
         "seed": args.seed,
+        **({"snapshot": True} if args.snapshot else {}),  # in each request: a resume keeps saving
     }
-    if args.page_count:
+    if args.pages:  # exactly these pages, in order: no discovery, no sample weight
+        reqs = [
+            {
+                "url": source.list_url(args.subcategory, args.region, p),
+                "kind": "list",
+                "meta": {**m, "page": p},
+            }
+            for p in args.pages
+        ]
+    elif args.page_count:
         start, pages = plan.systematic_pages(args.page_count, args.stride, args.start, args.seed)
         weight = plan.sample_weight(args.page_count, pages)
         reqs = [
@@ -465,13 +512,21 @@ def cmd_crawl_lists(args: argparse.Namespace) -> int:
     how = (
         "census" if args.stride == 1 else f"every {args.stride}th page, start {args.start}, seed {args.seed}"
     )
-    what = f"{len(reqs)} list pages" if args.page_count else "page 1, then the sample it plans"
+    what = (
+        f"pages {','.join(map(str, args.pages))}"
+        if args.pages
+        else f"{len(reqs)} list pages"
+        if args.page_count
+        else "page 1, then the sample it plans"
+    )
+    if args.pages:
+        how = "named pages" + (", snapshots saved" if args.snapshot else "")
     card = {
         "command": "crawl-lists",
         "purpose": f"read {what} of {args.subcategory} ({how})",
         "planned": {"list": len(reqs), "robots": 1},
         # crawlee's ceiling: the planned pages, or page 1 plus the most its sample may add
-        "ceiling": len(reqs) if args.page_count else 1 + args.max_pages,
+        "ceiling": len(reqs) if args.page_count or args.pages else 1 + args.max_pages,
     }
     return _execute(args, job, source, list_handler(job, source, args.max_pages), reqs, card, list_outcome)
 
@@ -1592,6 +1647,19 @@ def parser() -> argparse.ArgumentParser:
     c.add_argument("--start", type=int, help="first page in [1, stride]; random from --seed when omitted")
     c.add_argument("--seed", type=int)
     c.add_argument("--max-pages", type=int, default=60)
+    c.add_argument(
+        "--pages",
+        type=page_list,
+        metavar="N,N,...",
+        help="read exactly these list pages, in order (no page-count discovery); not with --stride/--start/"
+        "--seed/--page-count; counts toward --max-pages",
+    )
+    c.add_argument(
+        "--snapshot",
+        action="store_true",
+        help="save each answered list page (gzip) and a sidecar {status, final_url, ...} under "
+        "raw/lists/<site>/<crawl_id>/, before any parse or stop; a 404/410 list page is recorded, not a stop",
+    )
     driver(c)
     net(c)
     c.add_argument(

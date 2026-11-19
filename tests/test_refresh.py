@@ -811,3 +811,21 @@ def test_a_latched_site_refuses_the_refresh_before_any_plan_or_spend(chain, data
     assert main(["breaker", "clear", "--site", "example.invalid", "--resolve", "keep", "--note", "synthetic",
                  "--approve-operator"]) == 0  # fmt: skip
     assert main(["refresh", "--approve-network"]) == 0  # the same approval, unspent, now runs
+
+
+def test_a_refresh_step_with_named_pages_signs_them_and_bounds_exactly_them(
+    tmp_path,
+    monkeypatch,
+    data_dir,
+    operator_key,  # noqa: F811
+):
+    """--pages and --snapshot join the step's signed list set (only when set), and the bounds count exactly
+    the named pages (no `1 + max_pages` discovery allowance)."""
+    p = make_pipeline(tmp_path, monkeypatch, operator_key["fp"], steps=("crawl-lists",))
+    p.write_text(p.read_text().replace('"--stride", "2", "--start", "1"', '"--pages", "1,3", "--snapshot"'))
+    b, _ = refresh.build_bounds()
+    (lst,) = approvals.signed_lists(b)
+    assert lst["pages"] == [1, 3] and lst["snapshot"] is True and b["max_list_pages"] == 2
+    assert "pages 1, 3, exactly" in approvals.bounded_text(b)
+    step = cli._step_doc({"command": "crawl-lists", **lst})  # noqa: SLF001
+    assert approvals.list_args(step) == lst and step["list_pages"] == 2

@@ -194,17 +194,49 @@ def write_json(p: Path, name: str, doc: dict) -> None:
     tmp.replace(p)
 
 
-def write_raw(site: str, ad_id: str, fetched_at: str, html: str) -> dict:
-    """Gzip the fetched ad page under raw/<site>/<ad_id>/<fetched_at>.html.gz; return listing.v1 raw_ref.
-    sha256 and bytes describe the UNCOMPRESSED HTML, so they do not depend on gzip settings."""
+def _write_gz(rel: str, html: str) -> dict:
+    """Gzip `html` to DATA/<rel> (a temp file, then a rename); return its raw_ref. sha256 and bytes describe
+    the UNCOMPRESSED HTML, so they do not depend on gzip settings."""
     body = html.encode("utf-8")
-    rel = f"raw/{safe_name(site)}/{safe_name(ad_id)}/{safe_name(fetched_at.replace(':', '-'))}.html.gz"
     p = data_dir() / rel
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
     tmp.write_bytes(gzip.compress(body, mtime=0))
     tmp.replace(p)
     return {"path": rel, "sha256": hashlib.sha256(body).hexdigest(), "bytes": len(body)}
+
+
+def write_raw(site: str, ad_id: str, fetched_at: str, html: str) -> dict:
+    """Gzip the fetched ad page under raw/<site>/<ad_id>/<fetched_at>.html.gz; return listing.v1 raw_ref."""
+    return _write_gz(
+        f"raw/{safe_name(site)}/{safe_name(ad_id)}/{safe_name(fetched_at.replace(':', '-'))}.html.gz", html
+    )
+
+
+def list_snapshot_dir(site: str, crawl_id: str) -> str:
+    """DATA-relative folder of one crawl's list snapshots (ADR-0005, ADR-0017 A.4)."""
+    return f"raw/lists/{safe_name(site)}/{safe_name(crawl_id)}"
+
+
+def write_list_snapshot(site: str, crawl_id: str, page: int, html: str) -> dict:
+    """Gzip one answered list page under raw/lists/<site>/<crawl_id>/<page>.html.gz; return its raw_ref.
+    A page read again (a resume of a handed-back page) replaces its earlier copy."""
+    return _write_gz(f"{list_snapshot_dir(site, crawl_id)}/{int(page)}.html.gz", html)
+
+
+def _sidecar(site: str, crawl_id: str, page: int) -> Path:
+    return data_dir() / f"{list_snapshot_dir(site, crawl_id)}/{int(page)}.json"
+
+
+def write_list_sidecar(doc: dict) -> None:
+    """The list_snapshot.v1 sidecar next to the page: what HTML alone cannot prove (status, final_url)."""
+    write_json(_sidecar(doc["site"], doc["crawl_id"], doc["page"]), "list_snapshot.v1", doc)
+
+
+def update_list_sidecar(site: str, crawl_id: str, page: int, **fields) -> None:
+    """Fill in what is known only after the parse (parsed, skipped); validated again on write."""
+    p = _sidecar(site, crawl_id, page)
+    write_json(p, "list_snapshot.v1", read_json(p, "list_snapshot.v1") | fields)
 
 
 def read_raw(ref: dict) -> str:

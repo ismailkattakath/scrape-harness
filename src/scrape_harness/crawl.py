@@ -979,12 +979,64 @@ async def _crawl(
         except (store.DataDirError, OSError) as e:
             refused(ctx.request, e)
 
+    def snapshot(m: dict, res, reason: str | None) -> str:
+        """crawl-lists --snapshot: save the answered list page and its sidecar BEFORE any parse or stop decision
+        (ADR-0017 A.4), and return its outcome. A page with a challenge sign keeps only its sidecar: its body
+        is already saved in STATE by the challenge stop (never synced); a page that merely lacks the list
+        expectation (EXPECTED_MISSING: detect() found no challenge sign on it) is the site's own page, kept.
+        Only a refused write (DataDirError/OSError) leaves here; it takes the one path `refused`."""
+        outcome = (
+            "past_end" if reason in challenge.GONE
+            else "stopped" if reason
+            else "redirected" if (res.final_url or res.url) != res.url
+            else "listed"
+        )  # fmt: skip
+        page, keep = int(m["page"]), reason is None or reason in challenge.GONE + challenge.EXPECTED_MISSING
+        try:
+            body = store.write_list_snapshot(job.doc["source"], rid, page, res.html) if keep else None
+            store.write_list_sidecar({
+                "schema": "list_snapshot.v1", "site": job.doc["source"], "crawl_id": rid, "page": page,
+                "requested_url": res.url, "final_url": res.final_url or res.url, "status": res.status,
+                "fetched_at": utcnow(), "reason": reason, "outcome": outcome, "parsed": None, "skipped": None,
+                "body": body,
+            })  # fmt: skip
+        except (store.DataDirError, OSError):
+            raise
+        except Exception as e:  # noqa: BLE001 - never crawlee's retry (a second GET): treat it as refused
+            raise OSError(f"list snapshot of page {page} not saved ({type(e).__name__}: {e})") from e
+        lst = job.doc.setdefault("list", {})
+        snap = lst.setdefault("snapshot", {"dir": store.list_snapshot_dir(job.doc["source"], rid), "saved": 0,
+                                           "past_end": [], "redirected": []})  # fmt: skip
+        snap["saved"] += 1
+        if outcome in ("past_end", "redirected") and page not in snap[outcome]:
+            snap[outcome].append(page)
+        return outcome
+
+    def counted(m: dict, res) -> None:
+        """A past-end or redirected page is saved, not kept: count its cards for the sidecar, best effort (the
+        page may not parse at all), and append no row (a redirected page's cards are not the page asked for)."""
+        try:
+            lp = source.parse_list(res.html, url=res.url, subcategory=m.get("subcategory"), page=m["page"],
+                                   seen_at=utcnow())  # fmt: skip
+        except Exception:  # noqa: BLE001 - evidence only: an unparsable past-end page is still recorded
+            return
+        store.update_list_sidecar(job.doc["source"], rid, m["page"], parsed=len(lp.observations),
+                                  skipped=getattr(lp, "skipped", None))  # fmt: skip
+
     async def answered(ctx, res) -> None:
         n_hops = hops.get(ctx.request.unique_key)
         log_page(ctx.request, res.status, res.final_url)
         attempts.done(ctx.request.unique_key)
         kind = ctx.request.user_data.get("kind", "list")
         reason = challenge.detect(res, source.expect.get(kind), ignore)
+        if kind == "list" and ctx.request.user_data.get("snapshot"):
+            outcome = snapshot(ctx.request.user_data, res, reason)
+            if outcome in ("past_end", "redirected"):  # recorded, never a challenge stop and never rows
+                counted(ctx.request.user_data, res)
+                job.save()
+                runlog.LOG.info("list page %s %s (%s), saved", ctx.request.user_data.get("page"), outcome,
+                                reason or urlsplit(res.final_url).path, extra={"event": "list_" + outcome})  # fmt: skip
+                return
         why = (
             challenge.gone_reason(res, reason, source.expect.get("list"), gone_selectors, ignore)
             if kind == "ad"

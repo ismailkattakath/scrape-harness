@@ -424,7 +424,7 @@
     "list": {
       "type": "object",
       "additionalProperties": false,
-      "description": "crawl-lists: what the list walk yielded. `status` other than ok is a terminal stop, never a reference crawl. Absent on runs before the field.",
+      "description": "crawl-lists: what the list walk yielded. `status` other than ok is never a good crawl and never a reference crawl; every value but past_end and redirected is a terminal stop. Absent on runs before the field.",
       "properties": {
         "status": {
           "enum": [
@@ -432,9 +432,23 @@
             "zero_yield",
             "failed",
             "blocked",
-            "parse_drift"
+            "parse_drift",
+            "past_end",
+            "redirected"
           ],
-          "description": "ok: pages parsed with cards; zero_yield: a page gave 0 cards with no end marker; failed: a handler error; blocked: a challenge or refusal stopped it; parse_drift: too many cards skipped by the parser."
+          "description": "ok: pages parsed with cards; zero_yield: a page gave 0 cards with no end marker; failed: a handler error; blocked: a challenge or refusal stopped it; parse_drift: too many cards skipped by the parser; past_end / redirected (an evidence run, --snapshot only): the run completed, but a list page answered 404/410, or ended at another URL, so its sightings are not trusted."
+        },
+        "snapshot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["dir", "saved", "past_end", "redirected"],
+          "description": "crawl-lists --snapshot: where the run's list pages were saved, with a list_snapshot.v1 sidecar per page.",
+          "properties": {
+            "dir": { "type": "string", "pattern": "^raw/lists/" },
+            "saved": { "type": "integer", "minimum": 0, "description": "Sidecars written (pages answered, a challenge page included)." },
+            "past_end": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "description": "Pages that answered 404/410." },
+            "redirected": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "description": "Pages whose final URL differs from the URL asked for." }
+          }
         },
         "observations_written": {
           "type": "integer",

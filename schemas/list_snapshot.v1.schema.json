@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "list_snapshot.v1.schema.json",
+  "title": "list_snapshot.v1",
+  "description": "The sidecar of one saved list page (`crawl-lists --snapshot`), at DATA/raw/lists/<site>/<crawl_id>/<page>.json next to <page>.html.gz. It is written BEFORE any parse or stop decision, so it records what the HTML alone cannot prove: the status and the final URL (ADR-0017 A.1).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "site",
+    "crawl_id",
+    "page",
+    "requested_url",
+    "final_url",
+    "status",
+    "fetched_at",
+    "reason",
+    "outcome",
+    "parsed",
+    "skipped",
+    "body"
+  ],
+  "properties": {
+    "schema": { "const": "list_snapshot.v1" },
+    "site": { "type": "string", "minLength": 1 },
+    "crawl_id": { "type": "string", "minLength": 1 },
+    "page": { "type": "integer", "minimum": 1 },
+    "requested_url": { "type": "string", "format": "uri" },
+    "final_url": { "type": "string", "format": "uri", "description": "Where the GET ended, after any redirect." },
+    "status": { "type": "integer", "description": "The HTTP status of the final response." },
+    "fetched_at": { "type": "string", "format": "date-time" },
+    "reason": {
+      "type": ["string", "null"],
+      "description": "challenge.detect's reason code for the page (null: a normal list page)."
+    },
+    "outcome": {
+      "enum": ["listed", "past_end", "redirected", "stopped"],
+      "description": "listed: handed to the list parser, rows kept; past_end: answered 404/410, saved and recorded, not a challenge; redirected: final_url differs from requested_url, saved, its cards counted but not kept; stopped: a challenge stop (exit 5), as without snapshots."
+    },
+    "parsed": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Cards the list parser returned (null: not parsed, e.g. a challenge, or the parser raised)."
+    },
+    "skipped": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Cards the parser skipped, when the source reports it (ListPage.skipped)."
+    },
+    "body": {
+      "description": "The gzip body's raw_ref (sha256 and bytes of the UNCOMPRESSED HTML). null for a page with a challenge sign: its body stays in STATE (stops/, never synced), named by the challenge event.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "bytes"],
+          "properties": {
+            "path": { "type": "string", "pattern": "^raw/lists/" },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "bytes": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ]
+    }
+  }
+}

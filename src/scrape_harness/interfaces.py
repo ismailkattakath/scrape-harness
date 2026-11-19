@@ -28,6 +28,7 @@ class Region:
 class ListPage:
     observations: list[dict]  # observation.v1, minus nothing: the source fills every field it knows
     page_count: int | None
+    skipped: int | None = None  # optional: cards the parser saw but could not read (list snapshots record it)
 
 
 @dataclass(frozen=True)
