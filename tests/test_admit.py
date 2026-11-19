@@ -312,5 +312,9 @@ def test_sample_caps_the_revisit_lane_at_ceil_rho_n(data_dir, n):
     assert reasons.count("new") == min(3, n - reasons.count("stale_7d"))
     assert sel.ads["lanes"] == {"new": reasons.count("new"), "revisit": reasons.count("stale_7d")}
     assert sum(s["sampled"] for s in sel.design["strata"]) == len(sel.todo)
+    assert {s.get("lane") for s in sel.design["strata"]} == {"new", "revisit"}
     plans = [{"site": o["site"], "ad_id": o["ad_id"], "url": o["ad_url"]} for _, o in sel.todo]
     assert plan.assert_admissible(plans, observations, listings, [], sel.ads["as_of"], POL, n) == []
+    job = crawl.Run.new("fetch-ads", "desktop", SITE)  # the run doc carries both: run.v1 must accept them
+    job.doc["ads"], job.doc["sample"] = dict(sel.ads), dict(sel.design)
+    job.save()  # validates run.v1 (store.write_json)

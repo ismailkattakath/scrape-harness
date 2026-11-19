@@ -103,7 +103,9 @@ What counts as fresh:
   The lane is one more stratum, so each design weight N_h / n_h stays exact.
 - The postcondition (`plan.assert_admissible`) checks the cap on its own: at
   most ceil(rho * B) planned ads may already have a listing. A superseding
-  queue is not re-checked, because its own plan was capped.
+  queue is not re-checked: it can only shrink the plan that queued it, and
+  the tail of a select_ads queue is mostly revisits. A queue planned before
+  this cap existed is therefore not capped either.
 
 ## One signed policy
 

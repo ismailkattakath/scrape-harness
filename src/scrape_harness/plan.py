@@ -204,8 +204,8 @@ def assert_admissible(
         one at least readmit_h after the earliest such gone and after the latest one. An operator `void` of the
         gone's run (corrections.gone_effect) drops it;
       - with the plan's budget B: at most ceil(rho * B) revisits, an ad with ANY listing being a revisit (the
-        gate's `new` is exactly "no listing"). Without B (a superseding queue, whose own plan was capped) the
-        rule is not checked."""
+        gate's `new` is exactly "no listing"). Without B (a superseding queue: a subset of the plan that
+        queued it, capped only if that plan was) the rule is not checked."""
     from . import corrections
 
     observations, listings, events = list(observations), list(listings), list(events)
