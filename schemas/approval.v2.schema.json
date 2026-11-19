@@ -447,6 +447,11 @@
             "type": "string"
           }
         },
+        "policy_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "The fetch-ads step's SyncPolicy digest (policy.py). consume_bounded refuses (NotApproved) a fetch-ads step whose digest differs, or bounds that sign none. Absent when no fetch-ads step is declared."
+        },
         "steps": {
           "type": "array",
           "minItems": 1,

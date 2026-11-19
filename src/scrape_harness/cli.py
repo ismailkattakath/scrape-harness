@@ -23,11 +23,14 @@ from pathlib import Path
 from . import (
     approvals,
     contracts,
+    corrections,
     crawl,
     egress,
     incidents,
+    liveness,
     pipeline,
     plan,
+    policy,
     refresh,
     runcard,
     schemaorg,
@@ -469,19 +472,76 @@ def cmd_crawl_lists(args: argparse.Namespace) -> int:
     return _execute(args, job, source, list_handler(job, source, args.max_pages), reqs, card, list_outcome)
 
 
-def fetch_plan(now: datetime) -> list[tuple[str, dict]]:
+def _now() -> datetime:
+    """The one clock fetch-ads plans by (a test seam). A plan's as_of is this, to the second, and is signed."""
+    return datetime.now(UTC)
+
+
+def _iso(dt: datetime) -> str:
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _run_docs() -> list[dict]:
+    d = store.data_dir() / "runs"  # read only: a dry run creates nothing
+    return [store.read_json(p, "run.v1") for p in sorted(d.glob("*.json"))] if d.is_dir() else []
+
+
+def _records() -> tuple[list, list, list, list]:
+    return (
+        list(store.read("observations")),
+        list(store.read("listings")),
+        list(store.read("events")),
+        _run_docs(),
+    )
+
+
+def _passed_lists(runs: list[dict], events: list[dict], refresh_run: str) -> set[str]:
+    """The crawl-lists runs of THIS refresh that passed: corrected status completed and list.status ok."""
+    fixed = corrections.apply(runs, events)
+    return {
+        d["run_id"]
+        for d in runs
+        if d.get("command") == "crawl-lists"
+        and (d.get("approval_ref") or {}).get("refresh_run") == refresh_run
+        and fixed[d["run_id"]]["status"] == "completed"
+        and fixed[d["run_id"]]["list_status"] == "ok"
+    }
+
+
+def fetch_pool(
+    recs: tuple, pol: policy.SyncPolicy, as_of: str, refresh_run: str | None = None
+) -> tuple[list[dict], dict[str, int], str]:
+    """(candidates, excluded, as_of): the fresh-sighting gate over DATA (plan.eligible).
+
+    Sightings are the GOOD, non-sponsored list cards (liveness.good_crawl); states are the liveness ledger's.
+    Fresh: inside a refresh, sighted by a list step of THIS refresh that passed, and as_of is the latest such
+    sighting (DATA, not the clock); standalone, sighted within the policy window of `as_of`, the plan time."""
+    observations, listings, events, runs = recs
+    rules = pol.rules()
+    ledger = liveness.build(observations, listings, events, runs, rules)
+    good = liveness.good_crawl(runs, events, rules)
     sightings: dict[tuple, list[dict]] = {}
-    for o in store.read("observations"):
-        if not o["list"].get("sponsored"):
+    for o in observations:
+        if not o["list"].get("sponsored") and good(o.get("crawl_id")):
             sightings.setdefault((o["site"], o["ad_id"]), []).append(o)
-    latest = store.latest(store.read("listings"), lambda r: (r["source"]["site"], r["ad_id"]), "fetched_at")
-    out = []
-    for key, seen in sightings.items():
-        reason = plan.fetch_reason(latest.get(key), seen, now)
-        if reason:
-            out.append((reason, max(seen, key=lambda o: o["seen_at"])))
-    order = {"new": 0, "card_changed": 1, "stale_7d": 2}
-    return sorted(out, key=lambda t: (order[t[0]], t[1]["seen_at"]))
+    latest = store.latest(listings, lambda r: (r["source"]["site"], r["ad_id"]), "fetched_at")
+    if refresh_run:
+        passed = _passed_lists(runs, events, refresh_run)
+        mine = [o["seen_at"] for o in observations if o.get("crawl_id") in passed]
+        as_of = max(mine) if mine else as_of
+
+        def fresh(o: dict) -> bool:
+            return o.get("crawl_id") in passed
+    else:
+        lo = plan.ts(as_of) - pol.window
+
+        def fresh(o: dict) -> bool:
+            return plan.ts(o["seen_at"]) >= lo
+
+    cands, excluded = plan.eligible(
+        sightings, latest, lambda k: ledger.status(*k), fresh, plan.ts(as_of), pol
+    )
+    return cands, excluded, as_of
 
 
 def never_opened(cands: list[tuple[str, dict]]) -> list[tuple[str, dict]]:
@@ -495,19 +555,30 @@ def never_opened(cands: list[tuple[str, dict]]) -> list[tuple[str, dict]]:
     ]
 
 
-def _sample(args: argparse.Namespace) -> tuple[list[tuple[str, dict]], dict | None, list[dict]]:
-    """(todo, sample design or None, picks). Without --sample: the first --max-fetches candidates.
-    --select recruit: the same stratified sampler, over never-opened ads only (needs --sample)."""
-    cands = fetch_plan(datetime.now(UTC))
+@dataclasses.dataclass
+class Selection:
+    todo: list[tuple[str, dict]]
+    design: dict | None
+    picks: list[dict]
+    ads: dict  # the run doc's ads{}: as_of, policy_digest, eligible, excluded, lanes (select_ads only)
+
+
+def _select(args: argparse.Namespace, pol: policy.SyncPolicy, recs: tuple, as_of: str) -> Selection:
+    """Without --sample: plan.select_ads over the gated pool, budget --max-fetches. --sample (and --select
+    recruit, which needs it): the stratified sampler, over the SAME gated pool (recruit: its never-opened)."""
     recruit = getattr(args, "select", "refetch") == "recruit"
-    if recruit:
-        if not args.sample:
-            raise SystemExit("--select recruit needs --sample N (a seeded, stratified one-off sample)")
-        cands = never_opened(cands)
-    if not args.sample:
-        return cands[: args.max_fetches], None, []
-    if args.seed is None:
+    if recruit and not args.sample:
+        raise SystemExit("--select recruit needs --sample N (a seeded, stratified one-off sample)")
+    if args.sample and args.seed is None:
         raise SystemExit("--sample needs --seed, so the approved sample is the one fetched")
+    pool, excluded, as_of = fetch_pool(recs, pol, as_of, getattr(args, "refresh_run", None))
+    ads = {"as_of": as_of, "policy_digest": pol.digest(), "eligible": len(pool), "excluded": excluded}
+    if not args.sample:
+        todo, lanes = plan.select_ads(pool, args.max_fetches, pol)
+        return Selection(todo, None, [], ads | {"lanes": lanes})
+    cands = [(c["reason"], c["obs"]) for c in pool]
+    if recruit:
+        cands = never_opened(cands)
     subs = args.subcategories.split(",") if args.subcategories else None
     picks, strata = plan.stratified_sample(cands, args.sample, args.seed, args.allocation, subs)
     design = {
@@ -519,7 +590,78 @@ def _sample(args: argparse.Namespace) -> tuple[list[tuple[str, dict]], dict | No
         "strata": strata,
         **({"select": "recruit"} if recruit else {}),
     }
-    return [(p["reason"], p["obs"]) for p in picks], design, picks
+    return Selection([(p["reason"], p["obs"]) for p in picks], design, picks, ads)
+
+
+def _fetch_plan_doc(args: argparse.Namespace, sel: Selection, source, variant: str) -> dict:
+    design = sel.design
+    return run_plan(
+        args,
+        "fetch-ads",
+        source,
+        [variant],
+        max_fetches=None if design else args.max_fetches,
+        sample=design,
+        **({"select": "recruit"} if design and design.get("select") == "recruit" else {}),
+        as_of=sel.ads["as_of"],  # signed: the run re-selects at THIS time, so it reproduces the plan
+        policy_digest=sel.ads["policy_digest"],
+        ads=[[r, o["ad_url"]] for r, o in sel.todo],
+    )
+
+
+def _signed_selection(args: argparse.Namespace, pol: policy.SyncPolicy, recs: tuple) -> Selection | None:
+    """A networked run re-selects at the as_of its approved plan signed (newest approval first) and keeps the
+    selection whose rebuilt plan holds a live approval: the signature decides as_of, like the proxy. None:
+    no such plan; the run then selects at now and the gate refuses an unapproved plan (exit 10)."""
+    for doc in approvals.approved_plans("fetch-ads"):
+        as_of = doc.get("as_of")
+        if not as_of or doc.get("policy_digest") != pol.digest() or plan.ts(as_of) > _now():
+            continue
+        sel = _select(args, pol, recs, as_of)
+        if {o["site"] for _, o in sel.todo} != {doc.get("site")}:
+            continue
+        source = load("sources", doc["site"])
+        variant = _variant(args, source, "ad")
+        if _networked(args, [variant]) and approvals.has_live(
+            approvals.canonical(_fetch_plan_doc(args, sel, source, variant))[1]
+        ):
+            return sel
+    return None
+
+
+def selection_words(ads: dict) -> str:
+    """The run card's Selection row: the gate and the lanes, in plain words."""
+    lanes = ads.get("lanes")
+    ex = ads.get("excluded") or {}
+    return (
+        f"{ads.get('eligible', 0)} eligible"
+        + (f"; new {lanes['new']}, revisit {lanes['revisit']}" if lanes else "")
+        + "; excluded: "
+        + ", ".join(f"{k} {ex.get(k, 0)}" for k in plan.EXCLUDED)
+        + f"; as_of {ads.get('as_of')}, policy {str(ads.get('policy_digest'))[:19]}"
+    )
+
+
+def ads_outcome(planned: set[tuple]):
+    """fetch-ads' postcheck: the run's ads{} outcome (ad GETs sent, listings written, gone events)."""
+
+    def check(job: crawl.Run, stop: crawl.Stop | None) -> None:
+        a = job.doc.setdefault("ads", {})
+        rid, since = job.doc["run_id"], job.doc["created_at"]
+        a["ad_gets"] = int(job.doc.get("requests", {}).get("ad_pages", 0))
+        a["ok"] = len(
+            {
+                (r["source"]["site"], r["ad_id"])
+                for r in store.read("listings")
+                if r.get("fetch_reason") != "reparse"
+                and r["fetched_at"] >= since
+                and (r["source"]["site"], r["ad_id"]) in planned
+            }
+        )
+        a["gone"] = sum(1 for e in store.read("events") if e.get("run_id") == rid and e["kind"] == "gone")
+        return None
+
+    return check
 
 
 def _write_sample_manifest(job: crawl.Run, source, design: dict, picks: list[dict]) -> str:
@@ -603,7 +745,13 @@ def cmd_fetch_ads(args: argparse.Namespace) -> int:
         _refresh_step(args)
     if getattr(args, "supersede", None):
         return _fetch_superseding(args)
-    todo, design, picks = _sample(args)
+    pol = policy.from_args(args)
+    recs = _records()
+    sel = None
+    if not args.plan and not args.dry_run and not getattr(args, "refresh_run", None):
+        sel = _signed_selection(args, pol, recs)
+    sel = sel or _select(args, pol, recs, _iso(_now()))
+    todo, design, picks = sel.todo, sel.design, sel.picks
     if args.dry_run:
         _card(
             "fetch-ads",
@@ -611,6 +759,7 @@ def cmd_fetch_ads(args: argparse.Namespace) -> int:
             mode="dry-run",
             planned={"ad": len(todo), "robots": 1} if todo else {},
             per_minute=args.max_tasks_per_minute,
+            selection=selection_words(sel.ads),
             **_dry_run_gates(args, todo),
         )
         if design:
@@ -643,20 +792,7 @@ def cmd_fetch_ads(args: argparse.Namespace) -> int:
     source = load("sources", sites.pop())
     variant = _variant(args, source, "ad")
     _polite(args)
-    approval = gate(
-        args,
-        run_plan(
-            args,
-            "fetch-ads",
-            source,
-            [variant],
-            max_fetches=None if design else args.max_fetches,
-            sample=design,
-            **({"select": "recruit"} if design and design.get("select") == "recruit" else {}),
-            ads=[[r, o["ad_url"]] for r, o in todo],
-        ),
-        [variant],
-    )
+    approval = gate(args, _fetch_plan_doc(args, sel, source, variant), [variant])
     if approval and "planned" in approval:
         return 0
     _check_backend(args, variant, "fetch-ads")
@@ -677,12 +813,13 @@ def cmd_fetch_ads(args: argparse.Namespace) -> int:
     job = crawl.Run.new("fetch-ads", variant, source.site)
     if approval:
         job.doc["approval_ref"] = approval
+    job.doc["ads"] = dict(sel.ads)
     if design:
         job.doc["sample"] = {**design, "manifest": _write_sample_manifest(job, source, design, picks)}
     how = (
         f"depth-stratified sample, seed {design['seed']}, {design['allocation']} allocation"
         if design
-        else "first candidates of the refetch rule"
+        else "freshly sighted ads, by select_ads"
     )
     card = {
         "command": "fetch-ads",
@@ -690,8 +827,10 @@ def cmd_fetch_ads(args: argparse.Namespace) -> int:
         "planned": {"ad": len(todo), "robots": 1},
         "ceiling": len(reqs),
         "sample_file": store.safe_name(job.doc["run_id"]) if design else None,
+        "selection": selection_words(sel.ads),
     }
-    return _execute(args, job, source, ad_handler(source), reqs, card)
+    planned = {(o["site"], o["ad_id"]) for _, o in todo}
+    return _execute(args, job, source, ad_handler(source), reqs, card, ads_outcome(planned))
 
 
 def _fetch_superseding(args: argparse.Namespace) -> int:
@@ -1308,7 +1447,18 @@ def parser() -> argparse.ArgumentParser:
     c.set_defaults(fn=cmd_crawl_lists)
 
     f = sub.add_parser("fetch-ads", help="GET ad pages the refetch rule selects -> listings.jsonl")
-    f.add_argument("--max-fetches", type=int, default=40, help="without --sample: the first N candidates")
+    f.add_argument(
+        "--max-fetches",
+        type=int,
+        default=40,
+        help="without --sample: the budget B, a ceiling (select_ads; an empty pool sends nothing)",
+    )
+    f.add_argument("--window-h", type=int, help=f"a sighting is fresh within H hours of the plan (default "
+                   f"{policy.DEFAULT.window_h}); older ones are dormant")  # fmt: skip
+    f.add_argument("--rho", type=float, help=f"the revisit lane's hard cap, a share of the budget (default "
+                   f"{policy.DEFAULT.rho})")  # fmt: skip
+    f.add_argument("--stale-after-d", type=int, help=f"a stored copy older than D days is due a revisit "
+                   f"(default {policy.DEFAULT.stale_after_d})")  # fmt: skip
     f.add_argument("--sample", type=int, help="pick N candidates, stratified (see --stratify)")
     f.add_argument(
         "--stratify", choices=["depth"], default="depth", help="strata: (subcategory, depth decile)"

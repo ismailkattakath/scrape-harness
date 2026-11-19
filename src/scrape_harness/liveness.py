@@ -195,6 +195,21 @@ class Ledger:
         ]
 
 
+def good_crawl(runs: Iterable[Mapping], events: Iterable[dict], rules: Rules = DEFAULT):
+    """crawl_id -> whether its list sightings count (the ONE rule; the planner's gate reads it too). A crawl
+    is good unless its corrected status or its list.status is in the rules' bad sets; a crawl_id with no run
+    doc, or none at all, cannot be judged and counts as good."""
+    fixed = corrections.apply(runs, events)
+
+    def good(crawl_id) -> bool:
+        r = fixed.get(crawl_id) if crawl_id else None
+        return r is None or (
+            r["status"] not in rules.bad_status and r["list_status"] not in rules.bad_list_status
+        )
+
+    return good
+
+
 def build(
     observations: Iterable[dict],
     listings: Iterable[dict],
@@ -205,14 +220,9 @@ def build(
     """The ledger of every ad the records mention. `events` in FILE order (the corrections' order counts);
     the other inputs in any order."""
     observations, listings, events = list(observations), list(listings), list(events)
+    runs = list(runs)
     fixed = corrections.apply(runs, events)
-
-    def good(crawl_id) -> bool:
-        r = fixed.get(crawl_id) if crawl_id else None
-        return r is None or (
-            r["status"] not in rules.bad_status and r["list_status"] not in rules.bad_list_status
-        )
-
+    good = good_crawl(runs, events, rules)
     accs: dict[tuple, _Acc] = {}
 
     def acc(k: tuple) -> _Acc:

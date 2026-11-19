@@ -20,6 +20,8 @@
     "eligible": 10,
     "excluded": { "tombstoned": 3, "dormant": 4, "quarantined": 0, "held": 1 },
     "ad_gets": 6,
+    "as_of": "2026-01-16T06:09:30Z",
+    "policy_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
     "ok": 1,
     "gone": 5
   },

@@ -505,6 +505,16 @@
           "type": "integer",
           "minimum": 0,
           "description": "Of ad_gets, those that wrote a gone event."
+        },
+        "as_of": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The plan time the selection was made at (signed in a standalone plan; inside a refresh, the latest sighting of its passed list steps). fetch_reason and the freshness window read it, never the wall clock."
+        },
+        "policy_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "sha256 of the SyncPolicy the selection ran under (policy.py), signed in the plan or the refresh bounds."
         }
       }
     },

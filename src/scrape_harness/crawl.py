@@ -1147,6 +1147,7 @@ def _emit_card(job: Run, info: dict | None, polite: Politeness, backend: str, eg
         approval_id=ref.get("approval_id"),
         egress=egress_value,
         log_abs=str(runlog.log_path(job.doc["run_id"])[0]),
+        selection=info.get("selection"),
     )
     runcard.render(card)
     runlog.LOG.info("run card", extra={"event": "run_card", "card": card})

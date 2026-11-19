@@ -149,6 +149,7 @@
             pkgs.python3Packages.pytestCheckHook
             pkgs.git # test_data_dir_inside_a_repo_is_refused runs `git init`
             pkgs.python3Packages.wcwidth # the run-card width test measures with it, not with rich
+            pkgs.python3Packages.hypothesis # property tests of the ad selector (tests/test_select_ads.py)
             pkgs.openssh # ssh-keygen -Y sign/verify: the approval signatures
             pkgs.nodejs # drives plugin/workflows/plan-pipeline.js with mocked agents (tests/test_workflow.py)
           ];
@@ -170,6 +171,7 @@
           ++ [
             ps.pytest
             ps.wcwidth
+            ps.hypothesis
             (ps.mkPythonEditablePackage {
               pname = pyproject.project.name;
               inherit (pyproject.project) version;

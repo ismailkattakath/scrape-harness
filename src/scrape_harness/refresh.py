@@ -195,14 +195,14 @@ def configured_proxies() -> tuple[str, ...]:
 def build_bounds(ttl: str = DEFAULT_TTL, max_ad_requests: int | None = None) -> tuple[dict, bool]:
     """(bounds, networked). The bounds of THIS refresh from [crawl.refresh] and the options; the proxy is
     filled in only when exactly one is configured (with several, the plan picks one: pick_proxy)."""
-    from . import cli, crawl, egress, plan
+    from . import cli, crawl, egress, plan, policy
     from .interfaces import load
 
     pl = pipeline.current()
     site = pipeline.consumer().default_site
     variants, backends, rates, concs = [], [], [], []
     override = networked = False
-    lists, max_lists, max_ads, reasons = [], 0, 0, []
+    lists, max_lists, max_ads, reasons, ad_policy = [], 0, 0, [], None
     for st in pl.refresh:
         if st.name not in pipeline.REFRESH_SITE_STEPS:
             continue
@@ -228,6 +228,7 @@ def build_bounds(ttl: str = DEFAULT_TTL, max_ad_requests: int | None = None) -> 
             v = cli._variant(ns, load("sources", site), "ad")  # noqa: SLF001
             max_ads = ns.sample if ns.sample else ns.max_fetches
             reasons = ["recruit"] if ns.select == "recruit" else list(REFETCH_REASONS)
+            ad_policy = policy.from_args(ns).digest()  # the step's SyncPolicy: consume_bounded compares it
         if v not in variants:
             variants.append(v)
         b = cli._backend_name(ns, v)  # noqa: SLF001
@@ -256,6 +257,7 @@ def build_bounds(ttl: str = DEFAULT_TTL, max_ad_requests: int | None = None) -> 
         "max_list_pages": max_lists,
         "max_ad_requests": max_ads,
         "fetch_reasons": reasons,
+        **({"policy_digest": ad_policy} if ad_policy else {}),  # bounds with no fetch-ads hash as before
         "steps": [s.name for s in pl.refresh],
         "not_before": now.strftime(approvals.FMT),
         "expires_at": (now + approvals.parse_ttl(ttl)).strftime(approvals.FMT),

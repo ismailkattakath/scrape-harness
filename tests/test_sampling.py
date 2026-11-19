@@ -1,11 +1,12 @@
 """Depth-stratified ad sampling for H4: seeded, stratified, approved as an exact ad list."""
 
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from conftest import FIXTURES, LIST
 
-from scrape_harness import plan, store
+from scrape_harness import cli, plan, store
 from scrape_harness.cli import main
 from scrape_harness.drivers.fixture import FixtureHttpClient
 
@@ -19,6 +20,8 @@ FIX = [
     "--approve-politeness-override",
 ]
 SUBS = {"widgets": 530, "gadgets": 36}
+# a FRESH sighting: fetch-ads plans only ads sighted within the policy window (72 h) of its plan time
+FRESH = (datetime.now(UTC) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def obs(sub, page, i, count=None):
@@ -27,7 +30,7 @@ def obs(sub, page, i, count=None):
         "schema": "observation.v1",
         "ad_id": ad,
         "site": "example.invalid",
-        "seen_at": "2026-01-15T11:58:00Z",
+        "seen_at": FRESH,
         "ad_url": f"{LIST.replace('widgets', sub)}/synthetic_ad-{ad}",
         "list": {
             "url": f"{LIST}?page={page}",
@@ -112,7 +115,12 @@ def test_dry_run_sends_nothing_and_shows_strata(observed, capsys):
     assert FixtureHttpClient.log == [] and not (observed / "runs").exists()
 
 
-def test_the_plan_lists_the_exact_ads_and_the_design(observed, capsys):
+def test_the_plan_lists_the_exact_ads_and_the_design(observed, capsys, monkeypatch):
+    t0 = datetime.now(UTC)
+    monkeypatch.setattr(
+        cli, "_now", lambda: t0
+    )  # the plan signs its time (as_of): re-planning at t0 is equal
+
     def planned(*extra):
         capsys.readouterr()
         assert (

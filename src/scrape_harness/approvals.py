@@ -395,6 +395,28 @@ def refund(approval_id: str, run_id: str, note: str, now: datetime | None = None
     return rec
 
 
+def approved_plans(command: str, now: datetime | None = None) -> list[dict]:
+    """The saved plan docs of `command` that an unexpired `approved` line names, the newest approval first.
+    Candidates only (has_live/consume still check the signature and use): a run whose plan carries a signed
+    value it cannot recompute (fetch-ads' as_of) rebuilds each candidate and keeps the one that holds a live
+    approval. No ledger, no candidates: nothing is created on disk."""
+    now = now or datetime.now(UTC)
+    if not (store.state_dir() / "approvals" / "ledger.jsonl").exists():
+        return []
+    out = []
+    for r in reversed(chain()):
+        if r["kind"] != "approved" or _ts(r["expires_at"]) <= now:
+            continue
+        p = store.state_dir() / "plans" / f"{r['plan_hash']}.json"
+        try:
+            doc = json.loads(p.read_text())
+        except (OSError, ValueError):
+            continue
+        if doc.get("command") == command:
+            out.append(doc)
+    return out
+
+
 def has_live(plan_hash: str, now: datetime | None = None) -> bool:
     """Whether a matching, unexpired, unused, validly signed approval exists (nothing is spent)."""
     now = now or datetime.now(UTC)
@@ -734,7 +756,9 @@ def bounded_text(b: dict) -> str:
         f"BOUNDED approval for ONE refresh of {b['site']} (single use): steps {', '.join(b['steps'])}; "
         f"{lp}at most {b['max_list_pages']} list pages + {b['max_ad_requests']} ad pages in all, "
         f"plus one robots.txt check per site step ({site_steps}); "
-        f"ad fetch reasons {', '.join(b['fetch_reasons']) or 'none'}; variants {', '.join(b['variants'])} "
+        f"ad fetch reasons {', '.join(b['fetch_reasons']) or 'none'}"
+        + (f", ad policy {b['policy_digest'][:19]}" if b.get("policy_digest") else "")
+        + f"; variants {', '.join(b['variants'])} "
         f"via {', '.join(b['backends'])}; at most {b['max_rate_per_minute']}/min, concurrency "
         f"{b['concurrency']}{', politeness OVERRIDE' if b['politeness_override'] else ''}; egress "
         f"{b['egress_country']}, proxy {b.get('proxy') or 'none'}; {b['not_before']} to {b['expires_at']}"
@@ -905,6 +929,14 @@ def consume_bounded(
             f"approval {aid} was already used by refresh run {', '.join(others)}: a bounded approval is "
             f"single use; plan a new `{cli} refresh`"
         )
+    if step_doc.get("command") == "fetch-ads":  # the ad policy first: a mismatch is no approval at all
+        signed, sent = b.get("policy_digest"), step_doc.get("policy_digest")
+        if not signed or signed != sent:
+            raise NotApproved(
+                f"refresh step fetch-ads runs ad policy {sent or 'none'}, but approval {aid} signs "
+                f"{signed or 'no ad policy'}: the selection rules changed since the approval; plan a new "
+                f"`{cli} refresh`"
+            )
     used = bounded_usage(aid, refresh_run_id, ledger)
     lp, ar = int(step_doc.get("list_pages") or 0), int(step_doc.get("ad_requests") or 0)
     reasons = sorted(set(step_doc.get("fetch_reasons") or []))

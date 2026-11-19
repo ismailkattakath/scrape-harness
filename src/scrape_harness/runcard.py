@@ -151,6 +151,7 @@ def make(
     log_abs: str | None = None,
     blocking: str | None = None,
     proxy: str | None = None,
+    selection: str | None = None,
 ) -> dict:
     from . import store
 
@@ -194,6 +195,8 @@ def make(
     }
     if blocking:  # browser backends only
         card["scale"]["blocking"] = blocking
+    if selection:  # fetch-ads: the fresh-sighting gate and the lanes (other cards are unchanged)
+        card["scale"]["selection"] = selection
     if log_abs:
         line = tail_line(log_abs)
         card["live_log"] = {"path": log_abs, "tail": line, "copied": copy_to_clipboard(line)}
@@ -248,6 +251,7 @@ def rows(card: dict) -> list[tuple[str, str]]:
         ("Outputs", "\n".join(card["outputs"]) or "none"),
         ("Scale", _scale(card, planned)),
         *([("Blocking", sc["blocking"])] if sc.get("blocking") else []),
+        *([("Selection", sc["selection"])] if sc.get("selection") else []),
         ("ETA", _eta_row(card)),
         (
             "Triggered by",

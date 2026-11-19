@@ -4,6 +4,7 @@ so every rule is unit-tested offline."""
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 from datetime import datetime, timedelta
 
 STALE_AFTER = timedelta(days=7)
@@ -32,7 +33,12 @@ def _t(s: str) -> datetime:
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
-def fetch_reason(latest_listing: dict | None, sightings: list[dict], now: datetime) -> str | None:
+ts = _t  # public: parse a record's ISO-8601 UTC time
+
+
+def fetch_reason(
+    latest_listing: dict | None, sightings: list[dict], now: datetime, stale_after: timedelta = STALE_AFTER
+) -> str | None:
     """Why this ad page should be GET now, or None. Each GET adds a view to a real person's ad
     counter, so the default is NOT to fetch:
       new          never fetched;
@@ -48,9 +54,96 @@ def fetch_reason(latest_listing: dict | None, sightings: list[dict], now: dateti
     after = [o for o in seen if _t(o["seen_at"]) > fetched]
     if before and after and after[-1]["card_hash"] != before[-1]["card_hash"]:
         return "card_changed"
-    if after and now - fetched > STALE_AFTER:
+    if after and now - fetched > stale_after:
         return "stale_7d"
     return None
+
+
+# ── the fresh-sighting gate and the ad selector (ADR-0017 §B) ─────────────────────────────────────
+
+EXCLUDED = ("tombstoned", "dormant", "quarantined", "held")
+REVISIT = ("card_changed", "stale_7d")
+
+
+def eligible(
+    sightings: dict[tuple, list[dict]],
+    latest: dict[tuple, dict],
+    status: Callable[[tuple], str | None],
+    fresh: Callable[[dict], bool],
+    as_of: datetime,
+    policy,
+) -> tuple[list[dict], dict[str, int]]:
+    """(candidates, excluded): the ads a fetch may plan, and why the others the refetch rule names may not.
+
+    sightings: (site, ad_id) -> its GOOD, non-sponsored list sightings; latest: -> its latest listing;
+    status: -> its liveness state; fresh: whether a sighting is fresh (the caller's clock rule).
+    An ad is a candidate when the refetch rule names it at `as_of` (never the wall clock), its state is
+    alive, and it has a fresh sighting; the candidate carries its LATEST fresh sighting. An ad the rule
+    names that fails is counted once, by the first that applies: its liveness state, else `dormant` (only
+    old sightings: 0 GETs, nothing deleted). An ad the rule does not name is neither."""
+    out, excluded = [], dict.fromkeys(EXCLUDED, 0)
+    for key in sorted(sightings):
+        seen = sightings[key]
+        reason = fetch_reason(latest.get(key), seen, as_of, policy.stale_after)
+        if reason is None:
+            continue
+        state = status(key) or "alive"
+        if state != "alive":
+            excluded[state] += 1
+            continue
+        now_seen = [o for o in seen if fresh(o)]
+        if not now_seen:
+            excluded["dormant"] += 1
+            continue
+        lst = latest.get(key)
+        out.append(
+            {
+                "reason": reason,
+                "obs": max(now_seen, key=lambda o: (o["seen_at"], o.get("crawl_id") or "")),
+                "fetched_at": lst["fetched_at"] if lst else None,
+            }
+        )
+    return out, excluded
+
+
+def _ad_key(o: dict) -> tuple:
+    return (o["site"], o["ad_id"])
+
+
+def select_ads(cands: list[dict], budget: int, policy) -> tuple[list[tuple[str, dict]], dict[str, int]]:
+    """([(reason, observation)], lanes): at most `budget` ads, in request order. Pure and deterministic.
+
+    revisit lane (card_changed, stale_7d): q = min(n_revisit, ceil(rho * B)), a HARD cap; card_changed first,
+      then the oldest fetch first, then (site, ad_id).
+    new lane: B - q. Split equally across subcategories (`_equal`: a subcategory short of its share gives the
+      rest to the others); inside one, the latest crawl first (by its latest sighting), then page, position,
+      (site, ad_id). Unused revisit quota flows to new by construction; unused new quota never goes back.
+    B is a ceiling: an empty pool plans nothing. New picks come first in the request order (today's bumps),
+    then the revisits."""
+    budget = max(budget, 0)
+    rev = [c for c in cands if c["reason"] in REVISIT]
+    new = [c for c in cands if c["reason"] not in REVISIT]
+    rev.sort(key=lambda c: (c["reason"] != "card_changed", c["fetched_at"] or "", _ad_key(c["obs"])))
+    rev = rev[: min(len(rev), policy.revisit_cap(budget))]
+    crawl_at: dict = {}
+    for c in new:
+        o = c["obs"]
+        k = o.get("crawl_id") or ("", o["seen_at"])
+        crawl_at[k] = max(crawl_at.get(k, ""), o["seen_at"])
+
+    def new_key(c: dict) -> tuple:
+        o = c["obs"]
+        latest = crawl_at[o.get("crawl_id") or ("", o["seen_at"])]
+        lst = o.get("list") or {}
+        return (-_t(latest).timestamp(), lst.get("page") or 0, lst.get("position") or 0, _ad_key(o))
+
+    by_sub: dict[str, list[dict]] = {}
+    for c in sorted(new, key=new_key):
+        by_sub.setdefault((c["obs"].get("list") or {}).get("subcategory") or "unknown", []).append(c)
+    alloc = _equal(budget - len(rev), {s: len(v) for s, v in by_sub.items()})
+    new = sorted((c for s, v in by_sub.items() for c in v[: alloc[s]]), key=new_key)
+    picks = [(c["reason"], c["obs"]) for c in new + rev]
+    return picks, {"new": len(new), "revisit": len(rev)}
 
 
 # ── depth-stratified ad sampling (H4) ───────────────────────────────────────────────────────

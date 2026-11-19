@@ -12,7 +12,7 @@ import pytest
 from conftest import FIXTURES
 from wcwidth import wcswidth
 
-from scrape_harness import pipeline, runcard
+from scrape_harness import crawl, pipeline, runcard
 from scrape_harness.cli import main
 
 FIX = [
@@ -187,7 +187,7 @@ def test_a_real_dry_run_card_is_consistent(data_dir, capsys):
                 "schema": "observation.v1",
                 "ad_id": "1000001",
                 "site": "example.invalid",
-                "seen_at": "2026-01-15T11:58:00Z",
+                "seen_at": crawl.utcnow(),  # fresh: an old sighting is dormant, never planned
                 "ad_url": "https://www.example.invalid/listings/widgets/sample-region/synthetic_ad-1000001",
                 "list": {
                     "url": "https://www.example.invalid/listings/widgets/sample-region?page=1",

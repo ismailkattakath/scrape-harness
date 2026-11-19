@@ -15,7 +15,7 @@ import pytest
 from conftest import FIXTURES, ROOT
 from test_approvals import KeyFileSigner, ledger, make_key, networked, operator_key, runs  # noqa: F401
 
-from scrape_harness import approvals, cli, pipeline, refresh
+from scrape_harness import approvals, cli, pipeline, policy, refresh
 from scrape_harness.cli import main
 from scrape_harness.drivers.fixture import FixtureHttpClient
 
@@ -151,6 +151,7 @@ def bounds(**kw):
         "max_list_pages": 6,
         "max_ad_requests": 40,
         "fetch_reasons": ["card_changed", "new", "stale_7d"],
+        "policy_digest": policy.DEFAULT.digest(),  # the fetch-ads step's SyncPolicy, signed
         "steps": ["crawl-lists", "fetch-ads", "reparse"],
         "not_before": now.strftime(FMT),
         "expires_at": (now + timedelta(hours=12)).strftime(FMT),
@@ -174,7 +175,8 @@ def crawl_doc(**kw):
 def fetch_doc(n=30, **kw):
     d = {"command": "fetch-ads", "site": "example.invalid", "variants": ["desktop"], "backends": ["browser"],
          "concurrency": 1, "max_tasks_per_minute": 7, "politeness_override": False, "egress_country": "CA",
-         "list_pages": 0, "ad_requests": n, "fetch_reasons": ["new"]}  # fmt: skip
+         "list_pages": 0, "ad_requests": n, "fetch_reasons": ["new"],
+         "policy_digest": policy.DEFAULT.digest()}  # fmt: skip
     return d | kw
 
 
@@ -223,6 +225,40 @@ def test_each_bound_bites_and_spends_nothing(data_dir, doc, msg):
         approvals.consume_bounded(doc, st["run_id"], doc["command"])
     assert lines(data_dir) == before  # nothing appended, nothing spent
     assert approvals.consume_bounded(fetch_doc(), st["run_id"], "fetch-ads")["bounded"]  # still usable
+
+
+@pytest.mark.parametrize(
+    "signed, sent",
+    [
+        (policy.DEFAULT.digest(), "sha256:" + "0" * 64),  # the policy changed after the approval
+        (None, policy.DEFAULT.digest()),  # bounds signed before the policy was: they sign no policy
+        (policy.DEFAULT.digest(), None),  # a step that names no policy
+    ],
+    ids=["changed", "unsigned-bounds", "unnamed-step"],
+)
+def test_a_fetch_ads_policy_digest_mismatch_is_not_approved_and_appends_nothing(data_dir, signed, sent):
+    b = (
+        bounds(policy_digest=signed)
+        if signed
+        else {k: v for k, v in bounds().items() if k != "policy_digest"}
+    )
+    _, st = sign(b)
+    before = lines(data_dir)
+    doc = (
+        fetch_doc(policy_digest=sent)
+        if sent
+        else {k: v for k, v in fetch_doc().items() if k != "policy_digest"}
+    )
+    with pytest.raises(approvals.NotApproved, match="policy"):
+        approvals.consume_bounded(doc, st["run_id"], "fetch-ads")
+    assert lines(data_dir) == before
+    assert approvals.consume_bounded(crawl_doc(), st["run_id"], "crawl-lists")  # list steps sign no ad policy
+
+
+def test_the_bounds_sign_the_fetch_ads_policy(chain, data_dir, capsys):
+    capsys.readouterr()
+    assert main(["refresh", "--approve-network"]) == 10
+    assert json.loads(capsys.readouterr().out)["plan"]["policy_digest"] == policy.DEFAULT.digest()
 
 
 def test_a_step_that_is_not_signed_is_refused(data_dir):
@@ -393,6 +429,22 @@ def test_no_approval_prints_the_plan_and_sends_nothing(chain, data_dir, capsys):
 def test_approved_without_the_network_flag_is_refused(chain, data_dir, capsys):
     approved(capsys)
     assert main(["refresh"]) == 3 and chain == [] and refresh.states() == []
+
+
+def test_the_refresh_fetches_only_ads_its_own_list_step_sighted(chain, data_dir, capsys):
+    from test_fresh_gate import card_obs
+
+    from scrape_harness import crawl, store
+
+    store.append(
+        "observations", [card_obs(i, crawl.utcnow()) for i in range(5)]
+    )  # fresh, but not this refresh's
+    approved(capsys)
+    assert main(["refresh", "--approve-network"]) == 0
+    assert state()["headroom"]["ad_requests"]["used"] == 3  # the 3 ads its crawl-lists step sighted
+    (doc,) = [r for r in runs(data_dir) if r["command"] == "fetch-ads"]
+    assert doc["ads"]["lanes"] == {"new": 3, "revisit": 0} and doc["ads"]["excluded"]["dormant"] == 5
+    assert doc["ads"]["policy_digest"] == policy.DEFAULT.digest()
 
 
 def test_the_chain_runs_in_declared_order_and_spends_the_approval(chain, data_dir, capsys):

@@ -25,6 +25,8 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
+# Hypothesis' local example database (tests/test_select_ads.py)
+.hypothesis/
 
 # Python bytecode: it embeds absolute paths (the leak gate refused a push of it once)
 __pycache__/
