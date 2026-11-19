@@ -15,6 +15,11 @@ REF = EXAMPLE / "schemas" / "examples"
         ("finding.v1", EXAMPLES / "finding.example.json"),
         ("event.v1", EXAMPLES / "event.example.json"),
         ("run.v1", EXAMPLES / "run.example.json"),
+        ("run.v1", EXAMPLES / "run.list-stop.example.json"),  # list{} + stop{} (exit 14)
+        ("run.v1", EXAMPLES / "run.fetch-ads-sync.example.json"),  # ads{} + breaker{} + stop{}
+        ("event.v1", EXAMPLES / "event.parse-failed.example.json"),
+        ("incident.v1", EXAMPLES / "incident.example.json"),
+        ("incident.v1", EXAMPLES / "incident.parse.example.json"),
         ("ab.v1", EXAMPLES / "ab.example.json"),
         ("approval.v2", EXAMPLES / "approval.example.json"),
         ("sample.v1", EXAMPLES / "sample.example.json"),
@@ -35,6 +40,40 @@ def test_invalid_examples_fail(path):
     with pytest.raises(contracts.ContractError):
         name = next(n for n in contracts.names() if n.split(".")[0] == path.name.split(".")[0])
         contracts.validate(name, json.loads(path.read_text()))
+
+
+def test_records_written_before_the_sync_fields_still_validate():
+    """Additive contracts: a run, event or incident written before list/ads/breaker/stop and ad_id existed
+    is still valid, so every JSONL line already on disk still reads."""
+    run = json.loads((EXAMPLES / "run.example.json").read_text())
+    assert not {"list", "ads", "breaker", "stop"} & run.keys()
+    contracts.validate("run.v1", run)
+    ev = json.loads((EXAMPLES / "event.example.json").read_text())
+    assert "ad_id" not in ev
+    contracts.validate("event.v1", ev)
+    gone = {k: v for k, v in ev.items() if k != "evidence"} | {"kind": "gone", "reason": "expired_notice"}
+    contracts.validate("event.v1", gone)
+
+
+def test_a_gone_event_may_name_its_ad():
+    ev = json.loads((EXAMPLES / "event.example.json").read_text())
+    gone = {k: v for k, v in ev.items() if k != "evidence"} | {"kind": "gone", "reason": "http_410"}
+    contracts.validate("event.v1", gone | {"ad_id": "x-1"})
+    contracts.validate("event.v1", gone | {"ad_id": None})  # a legacy-shaped writer may not know it
+    with pytest.raises(contracts.ContractError):
+        contracts.validate("event.v1", gone | {"ad_id": ""})
+
+
+@pytest.mark.parametrize("status", ["ok", "zero_yield", "failed", "blocked", "parse_drift"])
+def test_every_list_status_validates(status):
+    run = json.loads((EXAMPLES / "run.list-stop.example.json").read_text())
+    contracts.validate("run.v1", run | {"list": {"status": status, "observations_written": 3}})
+
+
+@pytest.mark.parametrize("kind", ["parse", "gone_storm"])
+def test_the_new_incident_kinds_validate(kind):
+    inc = json.loads((EXAMPLES / "incident.parse.example.json").read_text())
+    contracts.validate("incident.v1", inc | {"kind": kind})
 
 
 def test_date_time_format_is_enforced():
@@ -96,3 +135,19 @@ def test_a_subschema_reference_is_the_first_lookup(cold_registry):
     contracts.validate(GEO, {"lat": 10.5, "lon": -29.5})
     with pytest.raises(contracts.ContractError):
         contracts.validate(GEO, {"lat": 91, "lon": 0})
+
+
+def test_the_sync_fields_round_trip_through_the_store(data_dir):
+    """Written by the store's own writers (which validate) and read back unchanged: a run doc with
+    list/stop and ads/breaker, and a parse_failed event naming its ad, beside a legacy event without one."""
+    from scrape_harness import store
+
+    for name in ("run.list-stop.example.json", "run.fetch-ads-sync.example.json"):
+        doc = json.loads((EXAMPLES / name).read_text())
+        p = store.runs_dir() / f"{store.safe_name(doc['run_id'])}.json"
+        store.write_json(p, "run.v1", doc)
+        assert store.read_json(p, "run.v1") == doc
+    new = json.loads((EXAMPLES / "event.parse-failed.example.json").read_text())
+    old = json.loads((EXAMPLES / "event.example.json").read_text())
+    assert store.append("events", [old, new]) == 2
+    assert list(store.read("events")) == [old, new]

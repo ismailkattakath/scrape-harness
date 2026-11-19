@@ -50,6 +50,10 @@ EXIT_EGRESS = egress.EXIT_EGRESS  # 8: the egress preflight refused (e.g. a VPN 
 # stop). Both record "stopped" (resumable), never "completed"; neither is a challenge, so neither counts
 # toward the cooldown. (9-11 are taken by the CLI, the approval gate and a consumer's own commands.)
 EXIT_UNREACHABLE, EXIT_INCOMPLETE = 12, 13
+# 14: a parse or yield stop (zero_yield, parse_drift, a breaker trip, a postcondition): the site answered but
+# what came back cannot be trusted. Terminal, never resumed into a reference crawl; it opens a `parse`
+# incident (a breaker trip a `gone_storm` one). Not a challenge, so it never counts toward the cooldown.
+EXIT_PARSE = 14
 UNREACHABLE_AFTER = 5  # consecutive page attempts with no response at all (timeouts, refused connections)
 
 

@@ -1,0 +1,48 @@
+{
+  "schema": "run.v1",
+  "run_id": "2026-01-16T06:10:00Z-fetch-ads",
+  "command": "fetch-ads",
+  "variant": "desktop",
+  "created_at": "2026-01-16T06:10:00Z",
+  "status": "stopped",
+  "challenges": 0,
+  "source": "example.invalid",
+  "queue": "2026-01-16t06-10-00z-fetch-ads-desktop",
+  "requests": {
+    "list_pages": 0,
+    "ad_pages": 6,
+    "robots": 1,
+    "other": 0,
+    "egress_trace": 1
+  },
+  "ads": {
+    "lanes": {
+      "new": 8,
+      "revisit": 2
+    },
+    "eligible": 10,
+    "excluded": {
+      "tombstoned": 3,
+      "dormant": 4,
+      "quarantined": 0,
+      "held": 1
+    },
+    "ad_gets": 6,
+    "ok": 1,
+    "gone": 5
+  },
+  "breaker": {
+    "tripped": true,
+    "at": "2026-01-16T06:12:00Z",
+    "kind": "gone",
+    "g": 5,
+    "n": 6,
+    "p0": 0.1,
+    "alpha": 0.0001,
+    "note": "x"
+  },
+  "stop": {
+    "code": 14,
+    "reason": "gone_storm: 5 absence gones in 6 ad GETs"
+  }
+}

@@ -1,7 +1,7 @@
 """STATE/ops/incidents.jsonl (incident.v1): the reliability protocol's record (SYNTHESIS §5).
 
 Every stop or refusal of a run opens an incident (challenge 5, cooldown 6, politeness 7, egress 8,
-approval 10, unreachable 12, incomplete 13); the plugin's monitor opens one for a stalled run. An incident stays OPEN until an `acked`
+approval 10, unreachable 12, incomplete 13, parse 14, or a breaker's gone_storm at 14); the plugin's monitor opens one for a stalled run. An incident stays OPEN until an `acked`
 line with its id is appended (`<cli> incidents ack ID --note ...`). Append-only: nothing is edited or
 deleted, so the file is the audit of who looked and what they did. Agents learn of an incident from the
 monitor's doorbell line, the session's task seed and the plugin hooks, which all read this file.
@@ -25,6 +25,7 @@ KIND = {
     10: "approval",
     12: "unreachable",
     13: "incomplete",
+    14: "parse",  # a breaker trip passes kind="gone_storm" explicitly
 }
 
 

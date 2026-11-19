@@ -76,3 +76,32 @@ def test_a_refused_networked_run_opens_an_approval_incident(data_dir, tmp_path, 
     assert main(argv) == 10
     (inc,) = lines(tmp_path)
     assert inc["kind"] == "approval" and inc["code"] == 10 and inc["stage"] == "crawl-lists"
+
+
+def test_exit14_opens_parse_incident(data_dir):
+    """Exit 14 (a parse/yield stop) must ring: an unmapped code used to open nothing."""
+    inc = incidents.open_incident(crawl.EXIT_PARSE, "STOPPED: zero_yield", "run-1", "crawl-lists")
+    assert inc and inc["kind"] == "parse" and inc["code"] == 14
+    contracts.validate("incident.v1", inc)
+    assert [r["id"] for r in incidents.open_ones()] == [inc["id"]]
+
+
+def test_a_gone_storm_opens_its_own_incident_kind(data_dir):
+    inc = incidents.open_incident(
+        crawl.EXIT_PARSE, "gone_storm: 5 of 6", "run-2", "fetch-ads", kind="gone_storm"
+    )
+    assert inc and inc["kind"] == "gone_storm" and inc["code"] == 14
+    contracts.validate("incident.v1", inc)
+
+
+def test_exit_parse_is_14_and_no_other_exit_code_takes_it():
+    from scrape_harness import approvals, cli, egress, refresh
+
+    assert crawl.EXIT_PARSE == 14
+    codes = {
+        f"{m.__name__}.{k}": v
+        for m in (crawl, cli, egress, approvals, refresh)
+        for k, v in vars(m).items()
+        if k.startswith("EXIT_") and isinstance(v, int)
+    }
+    assert [k for k, v in codes.items() if v == 14] == ["scrape_harness.crawl.EXIT_PARSE"]

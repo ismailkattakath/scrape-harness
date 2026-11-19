@@ -1,0 +1,10 @@
+{
+  "schema": "event.v1",
+  "at": "2026-01-16T06:11:00Z",
+  "run_id": "2026-01-16T06:10:00Z-fetch-ads",
+  "kind": "parse_failed",
+  "url": "https://www.example.invalid/ad/widgets/x-1",
+  "reason": "ContractError",
+  "site": "example.invalid",
+  "ad_id": "x-1"
+}

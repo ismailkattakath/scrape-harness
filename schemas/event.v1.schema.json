@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "event.v1.schema.json",
   "title": "event.v1",
-  "description": "One run-control event. Append-only JSONL. A `challenge` stops the run. Two challenges for the same SITE within one hour, across runs and A/B variants, write a site `cooldown` that every crawl command refuses to start before `until`. An operator's `cooldown_cleared` (appended, never a deletion) ends a site's cooldowns and resets its challenge count; ORDER in this append-only log decides what it covers.",
+  "description": "One run-control event. Append-only JSONL. A `challenge` stops the run. Two challenges for the same SITE within one hour, across runs and A/B variants, write a site `cooldown` that every crawl command refuses to start before `until`. An operator's `cooldown_cleared` (appended, never a deletion) ends a site's cooldowns and resets its challenge count; ORDER in this append-only log decides what it covers. A `parse_failed` names an ad page that was fetched but could not be parsed or validated: it is not retried (one view), and its raw snapshot stays for a reparse.",
   "type": "object",
   "required": [
     "schema",
@@ -36,7 +36,8 @@
         "run_correction",
         "superseded",
         "unreachable",
-        "incomplete"
+        "incomplete",
+        "parse_failed"
       ]
     },
     "url": {
@@ -67,6 +68,14 @@
         "null"
       ],
       "description": "The source site; challenges and cooldowns are counted per site."
+    },
+    "ad_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "description": "The ad this event is about (gone, parse_failed, failed_request on an ad page), keyed with `site`. Absent on events before the field: those join by url."
     },
     "evidence": {
       "type": "object",

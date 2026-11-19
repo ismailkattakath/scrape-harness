@@ -1,0 +1,11 @@
+{
+  "schema": "incident.v1",
+  "id": "INC-20260116T060100Z-d4e5f6",
+  "event": "opened",
+  "at": "2026-01-16T06:01:00Z",
+  "kind": "parse_error",
+  "code": 14,
+  "run_id": "2026-01-16T06:00:00Z-crawl-lists",
+  "stage": "crawl-lists",
+  "reason": "STOPPED: zero_yield: page 1 gave 0 cards and no end marker"
+}

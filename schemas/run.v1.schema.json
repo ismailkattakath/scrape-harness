@@ -401,6 +401,160 @@
           }
         }
       }
+    },
+    "stop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "reason"
+      ],
+      "description": "Why the run stopped with a non-zero exit: the exit code (e.g. 14 parse/yield) and its reason. run.v1 has no exit field otherwise; absent on runs that ended cleanly and on runs before the field.",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "list": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "crawl-lists: what the list walk yielded. `status` other than ok is a terminal stop, never a reference crawl. Absent on runs before the field.",
+      "properties": {
+        "status": {
+          "enum": [
+            "ok",
+            "zero_yield",
+            "failed",
+            "blocked",
+            "parse_drift"
+          ],
+          "description": "ok: pages parsed with cards; zero_yield: a page gave 0 cards with no end marker; failed: a handler error; blocked: a challenge or refusal stopped it; parse_drift: too many cards skipped by the parser."
+        },
+        "observations_written": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Observation rows this run appended (rows are persisted before any stop)."
+        }
+      }
+    },
+    "ads": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "fetch-ads: the selection (select_ads) and its outcome. Absent on runs before the field.",
+      "properties": {
+        "lanes": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Ads planned per lane. revisit is hard-capped at ceil(rho * budget); unused new-lane quota never flows into it.",
+          "properties": {
+            "new": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "revisit": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "eligible": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Ads that passed the fresh-sighting gate, before the budget."
+        },
+        "excluded": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Ads left out of the plan, by liveness state. Nothing is ever deleted: dormant ads (only sighted long ago) get 0 GETs.",
+          "properties": {
+            "tombstoned": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "dormant": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "quarantined": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "held": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "ad_gets": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Ad page GETs this run sent."
+        },
+        "ok": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of ad_gets, those that wrote a listing."
+        },
+        "gone": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of ad_gets, those that wrote a gone event."
+        }
+      }
+    },
+    "breaker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tripped"
+      ],
+      "description": "fetch-ads: the gone-storm / ad-failure breaker. A trip stops the run (exit 14) and opens a gone_storm incident. Absent on runs before the field.",
+      "properties": {
+        "tripped": {
+          "type": "boolean"
+        },
+        "at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "kind": {
+          "enum": [
+            "gone",
+            "failure",
+            null
+          ],
+          "description": "gone: absence/redirect gones; failure: parse_failed + failed_request."
+        },
+        "g": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Counted events when it was evaluated."
+        },
+        "n": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Ad GETs when it was evaluated."
+        },
+        "p0": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "alpha": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        }
+      }
     }
   },
   "$defs": {
