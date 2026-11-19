@@ -236,3 +236,17 @@ def test_the_trip_is_saved_before_anything_else_can_fail(data_dir, tmp_path, mon
     (doc,) = fetch_docs(data_dir)
     assert doc["breaker"]["tripped"] is True  # so the latch holds even without the correction
     assert main(["fetch-ads", *fix(pages(tmp_path, sighted(2, offset=300), [False] * 2))]) == crawl.EXIT_PARSE
+
+
+def test_a_refused_gone_write_still_counts_and_a_trip_on_it_wins(data_dir, tmp_path, monkeypatch):
+    """settle() runs before the data-folder stop: the fifth weak gone trips the breaker even though its own
+    event write was refused, so the louder stop (exit 14, latched) is the one recorded."""
+    from test_loud_failures import _refusing_gone
+
+    rows = sighted()
+    _refusing_gone(monkeypatch, nth=5)
+    FixtureHttpClient.log.clear()
+    assert main(["fetch-ads", *fix(pages(tmp_path, rows, [True] * N))]) == crawl.EXIT_PARSE
+    assert len(ad_gets()) == 5  # no retry of the fifth
+    (doc,) = fetch_docs(data_dir)
+    assert doc["breaker"]["g"] == 5 and doc["stop"]["code"] == crawl.EXIT_PARSE

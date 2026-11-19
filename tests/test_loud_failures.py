@@ -249,8 +249,73 @@ def test_a_data_dir_error_in_the_ad_handler_is_exit_4_after_one_get(data_dir, mo
     fetch = run_docs(data_dir)[-1]
     assert fetch["requests"]["ad_pages"] == 1 and len(served(LIST)) == 1
     assert fetch["status"] == "stopped" and fetch["stop"]["code"] == 4
-    assert crawl.pending(crawl.Run(fetch)) == 3  # nothing lost: a resume fetches all three
+    # the answered ad is DONE in the queue (STATE, local): its view is spent, a resume never re-GETs it
+    assert crawl.pending(crawl.Run(fetch)) == 2
     assert not [e for e in store.read("events") if e["kind"] == "parse_failed"]
+    first = served(LIST)
+    monkeypatch.setattr(store, "append", real)  # the data folder is fixed
+    assert main(["crawl", "resume", "--run-id", fetch["run_id"], *fix(FIXTURES)]) == 0
+    assert sorted(served(LIST)) == sorted([AD1, AD2, AD3]) and served(LIST)[0] == first[0]  # each ad once
+
+
+def test_a_refused_snapshot_of_an_unparsable_ad_is_exit_4_and_never_re_gets(data_dir, monkeypatch):
+    _crawl_and_plan(FIXTURES)
+
+    def parse_ad(self, html, *, url, **kw):
+        raise AttributeError("synthetic parser break")
+
+    def write_raw(*a, **kw):
+        raise store.DataDirError("the data folder went away")
+
+    real = store.write_raw
+    monkeypatch.setattr(ExampleSite, "parse_ad", parse_ad)
+    monkeypatch.setattr(store, "write_raw", write_raw)
+    assert main(["fetch-ads", *fix(FIXTURES)]) == 4
+    fetch = run_docs(data_dir)[-1]
+    (first,) = served(LIST)
+    assert crawl.pending(crawl.Run(fetch)) == 2
+    monkeypatch.setattr(store, "write_raw", real)  # the data folder is fixed; the parser still is not
+    assert main(["crawl", "resume", "--run-id", fetch["run_id"], *fix(FIXTURES)]) == 0
+    assert sorted(served(LIST)) == sorted([AD1, AD2, AD3]) and served(LIST).count(first) == 1
+
+
+def _refusing_gone(monkeypatch, nth=1):
+    """crawl.event refuses the nth `gone` write (a DATA outage); every other event is written."""
+    real, n = crawl.event, [0]
+
+    def event(rid, kind, *a, **kw):
+        if kind == "gone":
+            n[0] += 1
+            if n[0] == nth:
+                raise store.DataDirError("synthetic: the events file refused the write")
+        return real(rid, kind, *a, **kw)
+
+    monkeypatch.setattr(crawl, "event", event)
+    return real
+
+
+@pytest.mark.parametrize(
+    "gone", [{"file": "", "status": 410}, "list-p1.html"], ids=["http_410", "served_list"]
+)
+def test_a_refused_gone_event_is_exit_4_after_one_get_counted_and_never_re_got(data_dir, tmp_path, monkeypatch,
+                                                                               gone):  # fmt: skip
+    """Both gone branches: the refused write never reaches crawlee's retry (a second GET), the breaker still
+    counts the answered page, and a resume never sends it again."""
+    _crawl_and_plan(FIXTURES)
+    d = fixtures(tmp_path, {AD1: gone, AD2: gone, AD3: gone})
+    from scrape_harness import breaker
+
+    settled, settle = [], breaker.Breaker.settle
+    monkeypatch.setattr(breaker.Breaker, "settle",
+                        lambda self, o, r=None: settled.append(o) or settle(self, o, r))  # fmt: skip
+    real = _refusing_gone(monkeypatch)
+    assert main(["fetch-ads", *fix(d)]) == 4
+    fetch = run_docs(data_dir)[-1]
+    (first,) = served(LIST)  # one GET: no retry
+    assert settled == ["gone"] and fetch["stop"]["code"] == 4 and crawl.pending(crawl.Run(fetch)) == 2
+    monkeypatch.setattr(crawl, "event", real)
+    assert main(["crawl", "resume", "--run-id", fetch["run_id"], *fix(d)]) == 0
+    assert sorted(served(LIST)) == sorted([AD1, AD2, AD3]) and served(LIST).count(first) == 1
 
 
 # ── in a refresh, exit 14 is terminal ───────────────────────────────────────────────────────────────

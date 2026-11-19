@@ -949,6 +949,21 @@ async def _crawl(
         attempts.errored(ctx.request.unique_key)
         log_page(ctx.request, None)
 
+    def refused(req, e: Exception) -> None:
+        """A write the DATA root refused after a page answered: the store's DataDirError or the OS's own OSError
+        (a full disk, a permission error, a cloud-sync mount gone away). Resumable, exit 4, and never crawlee's
+        retry (a second GET). A LIST page is handed back (reclaimed: a list GET adds no ad view, and the resume
+        reads it). An AD page is left DONE in the queue: its view is spent, and the queue lives in STATE (local),
+        the one record that does not depend on the DATA root that just refused, so no resume re-GETs it. What
+        it would have written is lost; the warning names it."""
+        halt(Stop(EXIT_DATA, f"STOPPED: the data folder refused a write ({e}); fix it, then "
+                             f"`{pipeline.consumer().cli} crawl resume`"), "data folder")  # fmt: skip
+        if req.user_data.get("kind", "list") != "ad":
+            raise ChallengeDetected("data folder") from None  # crawlee reclaims the request: still pending
+        runlog.LOG.warning("ad page %s answered but not saved (%s: %s): its view is spent, it is not re-sent",
+                           urlsplit(req.url).path, type(e).__name__, e,
+                           extra={"event": "ad_unsaved", "reason": type(e).__name__})  # fmt: skip
+
     @crawler.router.default_handler
     async def default(ctx) -> None:
         if stopped:  # a stop was requested: hand the request back untouched
@@ -956,6 +971,15 @@ async def _crawl(
         silent[0] = 0  # a response: the site answers
         responded.discard(ctx.request.unique_key)
         res = await backend.result(ctx)
+        # The handler's own failures never reach crawlee: it would retry them (a second GET, for an ad page
+        # a second view) and then record the run `completed`. A refused write, wherever it happens below (a
+        # gone event, a snapshot, a record), takes the ONE path `refused`.
+        try:
+            await answered(ctx, res)
+        except (store.DataDirError, OSError) as e:
+            refused(ctx.request, e)
+
+    async def answered(ctx, res) -> None:
         n_hops = hops.get(ctx.request.unique_key)
         log_page(ctx.request, res.status, res.final_url)
         attempts.done(ctx.request.unique_key)
@@ -967,40 +991,29 @@ async def _crawl(
             else None
         )
         ad = ctx.request.user_data.get("ad_id") or None
-        if why:
-            event(rid, "gone", ctx.request.url, why, site=job.doc["source"], ad_id=ad)
-            settle(ctx.request, "gone", why)
-            runlog.LOG.info(
-                "gone %s (%s, at %s)",
-                urlsplit(ctx.request.url).path,
-                why,
-                urlsplit(res.final_url).path,
-                extra={"event": "gone", "reason": why},
-            )
-            return  # the ad was removed: the site shows its expired notice or the category list instead
-        if challenge.gone(reason, bool(ctx.request.user_data.get("revisit"))):
-            event(rid, "gone", ctx.request.url, reason, site=job.doc["source"], ad_id=ad)
-            settle(ctx.request, "gone", reason)
-            runlog.LOG.info(
-                "gone %s (%s)", ctx.request.url, reason, extra={"event": "gone", "reason": reason}
-            )
-            # Nothing to parse: the ad page is gone. The gone event is the ad's tombstone in `liveness`, which
-            # every planner reads (plan.eligible, plan.admit), so a later plan does not list the ad again.
+        # The ad was removed: the site shows its expired notice or the category list instead (why), or the
+        # response itself says so (a 404 or 410). Nothing to parse. The gone event is the ad's tombstone in
+        # `liveness`, which every planner reads (plan.eligible, plan.admit), so a later plan does not list it.
+        if gone := why or (
+            reason if challenge.gone(reason, bool(ctx.request.user_data.get("revisit"))) else None
+        ):
+            try:
+                event(rid, "gone", ctx.request.url, gone, site=job.doc["source"], ad_id=ad)
+            finally:  # the page answered, so the breaker counts it even when its event was refused
+                settle(ctx.request, "gone", gone)
+            at = f", at {urlsplit(res.final_url).path}" if why else ""
+            runlog.LOG.info("gone %s (%s%s)", urlsplit(ctx.request.url).path, gone, at,
+                            extra={"event": "gone", "reason": gone})  # fmt: skip
             return
         if reason:
             stopped.append(_challenge(job, ctx.request.url, reason, res, n_hops))
             crawler.stop(f"challenge: {reason}")
             raise ChallengeDetected(reason)  # crawlee reclaims the request: it stays pending for resume
-        # The handler's own failures never reach crawlee: it would retry them (a second GET, for an ad page
-        # a second view) and then record the run `completed`. Order matters: a refused write or a Stop is
-        # never mistaken for a parse failure. A refused write is the store's DataDirError or the OS's own
-        # OSError from a store write (a full disk, a permission error, a cloud-sync mount gone away).
+        # Order matters: a refused write (re-raised to `refused`) or a Stop is never a parse failure.
         try:
             new = handle(dict(ctx.request.user_data), res)
-        except (store.DataDirError, OSError) as e:  # resumable: the page is handed back, the resume reads it
-            halt(Stop(EXIT_DATA, f"STOPPED: the data folder refused a write ({e}); fix it, then "
-                                 f"`{pipeline.consumer().cli} crawl resume`"), "data folder")  # fmt: skip
-            raise ChallengeDetected("data folder") from None  # crawlee reclaims the request: still pending
+        except (store.DataDirError, OSError):
+            raise
         except Stop as s:  # terminal: this request is DONE, so a resume could never read it again
             if kind == "list":
                 list_status("failed")

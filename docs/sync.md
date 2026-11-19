@@ -40,6 +40,7 @@ the gate, with 0 GETs. It opens a `parse` incident. A breaker trip opens a
 | A list page failed after its retries | 13 (resumable) | `list.status: failed` |
 | A list page was disallowed by robots.txt | 13 | `list.status: blocked` |
 | An ad page could not be parsed | none: the run goes on | one `parse_failed` event (with `ad_id`), no retry |
+| The data folder refused a write after a page answered | 4 (resumable) | a list page is handed back; an ad page stays done in the queue, so no resume GETs it again |
 | The breaker tripped, or the site is latched | 14 | `breaker{}` on the run doc |
 
 Each stop is recorded on the run doc as `stop{code, reason}`. The ad page that
