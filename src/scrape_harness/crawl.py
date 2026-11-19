@@ -995,15 +995,16 @@ async def _crawl(
         except (store.DataDirError, OSError) as e:
             refused(ctx.request, e)
 
-    def snapshot(m: dict, res, reason: str | None) -> str:
+    def snapshot(m: dict, res, reason: str | None, end: bool = False) -> str:
         """crawl-lists --snapshot: save the answered list page and its sidecar BEFORE any parse or stop decision
         (ADR-0017 A.4), and return its outcome. A page with a challenge sign keeps only its sidecar: its body
         is already saved in STATE by the challenge stop (never synced); a page that merely lacks the list
         expectation (EXPECTED_MISSING: detect() found no challenge sign on it) is the site's own page, kept.
-        Only a refused write (DataDirError/OSError) leaves here; it takes the one path `refused`."""
+        Only a refused write (DataDirError/OSError) leaves here; it takes the one path `refused`. An END nominee
+        (`end`) is never `stopped`: it goes to the list parser, which accepts or refuses the END."""
         outcome = (
             "past_end" if reason in challenge.GONE
-            else "stopped" if reason
+            else "stopped" if reason and not end
             else "redirected" if redirected(res)
             else "listed"
         )  # fmt: skip
@@ -1062,7 +1063,7 @@ async def _crawl(
         )
         end = nominee == "end_marker"
         if kind == "list" and ctx.request.user_data.get("snapshot"):
-            outcome = snapshot(ctx.request.user_data, res, reason)
+            outcome = snapshot(ctx.request.user_data, res, reason, end)
             if outcome == "redirected" or (outcome == "past_end" and not end):  # recorded: no stop, no rows
                 counted(ctx.request.user_data, res)
                 job.save()

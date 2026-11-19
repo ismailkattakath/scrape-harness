@@ -253,6 +253,7 @@ the handler's own stop.
 | 200 at another URL (a redirect) | `redirected` | Saved, cards counted but **not** kept: they are not the page asked for |
 | A challenge sign (cf_mitigated, a challenge title, a marker, captcha, 403/429/503, a login redirect) or any other error status | `stopped` | Exit 5, as today. Sidecar only: the body stays in STATE `stops/`, never synced |
 | No list expectation and no challenge sign (`unexpected_page`, `signin_wall`, `consent_gate`) | `stopped` | Exit 5, as today. The body is saved: it is the site's own page |
+| The same, carrying the source's end marker | `listed` | Handed to the list parser, which decides the END (see "Positive END") |
 
 **Fail-closed.** Without `--snapshot`, a 404 list page is still a challenge stop
 (exit 5). A run that recorded a `past_end` or `redirected` page completes with

@@ -75,6 +75,9 @@ def _polite(args: argparse.Namespace) -> crawl.Politeness:
 
 def list_handler(job: crawl.Run, source, max_pages: int):
     def handle(m: dict, res: FetchResult) -> list[dict]:
+        # this page's END nomination (crawl's seam), taken out so no page planned from `m` can inherit it
+        m = dict(m)
+        marked, reason = m.pop("end_marker", False), m.pop("reason", None)
         lp = source.parse_list(
             res.html, url=res.url, subcategory=m["subcategory"], page=m["page"], seen_at=utcnow()
         )
@@ -84,14 +87,14 @@ def list_handler(job: crawl.Run, source, max_pages: int):
         # A positive END (ADR-0017 A.1), decided FIRST: before the page-count check (a past-end template has no
         # pager) and before any drift guard (a past-end page may still render promoted slots the parser skips).
         lst = job.doc.setdefault("list", {})
-        if m.get("end_marker") and not lp.observations and not crawl.redirected(res):
+        if marked and not lp.observations and not crawl.redirected(res):
             if lst.get("end_page") is None or m["page"] < lst["end_page"]:
                 lst["end_page"], lst["end_method"] = m["page"], "end_marker"
             return []
-        if m.get("end_marker") and m.get("reason"):  # it would have stopped the run: none of it is kept
+        if marked and reason:  # it would have stopped the run: none of it is kept
             lst["status"] = "end_unknown"
             raise crawl.Stop(crawl.EXIT_PARSE, f"STOPPED: end_unknown: list page {m['page']} carries the end "
-                             f"marker ({m['reason']}) but is not an END (" + ("served at another URL"
+                             f"marker ({reason}) but is not an END (" + ("served at another URL"
                              if crawl.redirected(res) else f"{len(lp.observations)} cards") + ")")  # fmt: skip
         if not lp.observations:  # 0 cards and no positive END: the list's end is unknown, or the parser broke
             lst["status"] = "zero_yield" if m["page"] == 1 else "end_unknown"

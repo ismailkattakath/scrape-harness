@@ -141,7 +141,7 @@ def test_a_200_page_with_the_marker_and_no_cards_is_end(data_dir, tmp_path, mark
     assert doc["list"]["status"] == "end" and doc["list"]["end_page"] == 400
 
 
-def test_an_empty_subcategory_is_an_end_on_page_one_not_a_zero_yield(data_dir, tmp_path, marker):
+def test_empty_subcategory_ok(data_dir, tmp_path, marker):
     """Page 1 with 0 cards is legitimate only with a positive END. Its template has no pager, so it must be
     END before the page-count check would call it parser drift."""
     d = fixtures(tmp_path, {P1: {"file": "end.html", "status": 404}}, [("end.html", END_HTML)])
@@ -214,7 +214,8 @@ def test_end_marker_never_hides_challenge(data_dir, tmp_path, marker, entry):
     assert doc["challenges"] == 1 and "end_page" not in doc["list"]
 
 
-def test_a_page_with_no_cards_past_page_one_is_end_unknown(data_dir, tmp_path):
+def test_broken_selector_not_end(data_dir, tmp_path):
+    """0 cards past page 1 with no marker (e.g. a card selector that no longer matches) is never an END."""
     empty = EMPTY_WITH_MARK.replace('<div id="no-results">No widgets match</div>', "")
     d = fixtures(tmp_path, {P3: "empty.html"}, [("empty.html", empty)])
     assert crawl_lists(d, "--pages", "1,3") == crawl.EXIT_PARSE
@@ -224,6 +225,25 @@ def test_a_page_with_no_cards_past_page_one_is_end_unknown(data_dir, tmp_path):
     from scrape_harness import incidents
 
     assert [i["kind"] for i in incidents.open_ones()] == ["parse"]
+
+
+def test_a_marker_on_page_one_never_rides_on_to_the_pages_it_plans(data_dir, tmp_path, marker):
+    """Page 1 with cards AND the marker is a normal page. The sample it plans must not inherit the nomination:
+    a planned page with 0 cards and no marker of its own is end_unknown, never an END."""
+    p1 = (FIXTURES / "list-p1.html").read_text().replace("</body>", '<div id="no-results">x</div></body>')
+    empty = EMPTY_WITH_MARK.replace('<div id="no-results">No widgets match</div>', "")
+    d = fixtures(tmp_path, {P1: "p1.html", P3: "empty.html"}, [("p1.html", p1), ("empty.html", empty)])
+    assert crawl_lists(d, "--stride", "2", "--start", "1") == crawl.EXIT_PARSE
+    assert list_gets() == [P1, P3]
+    (doc,) = run_docs(data_dir)
+    assert doc["list"]["status"] == "end_unknown" and "end_page" not in doc["list"]
+
+
+def test_a_200_page_without_the_list_expectation_but_with_the_marker_is_end(data_dir, tmp_path, marker):
+    d = fixtures(tmp_path, {P400: "end.html"}, [("end.html", END_HTML)])  # no #results: unexpected_page
+    assert crawl_lists(d, "--pages", "1,400") == 0
+    (doc,) = run_docs(data_dir)
+    assert doc["challenges"] == 0 and doc["list"]["status"] == "end" and doc["list"]["end_page"] == 400
 
 
 # ── --snapshot agrees with the default path ────────────────────────────────────────────────────────────
@@ -240,6 +260,17 @@ def test_a_snapshot_run_reads_a_marked_404_as_end(data_dir, tmp_path, marker, st
     s = sidecar(data_dir, rid, 400)
     assert s["outcome"] == "past_end" and s["parsed"] == 0 and s["reason"] == f"http_{status}"
     assert body(data_dir, rid, 400) == END_HTML
+
+
+def test_a_snapshot_run_records_a_200_end_without_the_list_expectation_as_listed(data_dir, tmp_path, marker):
+    """Its sidecar must not say `stopped` (an exit-5 challenge stop): the page went to the parser and ended."""
+    d = fixtures(tmp_path, {P400: "end.html"}, [("end.html", END_HTML)])
+    assert crawl_lists(d, "--pages", "1,400", "--snapshot") == 0
+    (doc,) = run_docs(data_dir)
+    assert doc["list"]["status"] == "end" and doc["list"]["end_page"] == 400
+    s = sidecar(data_dir, doc["run_id"], 400)
+    assert s["outcome"] == "listed" and s["reason"] == "unexpected_page" and s["parsed"] == 0
+    assert body(data_dir, doc["run_id"], 400) == END_HTML
 
 
 def test_a_snapshot_run_keeps_a_bare_404_as_evidence(data_dir, tmp_path, marker):
