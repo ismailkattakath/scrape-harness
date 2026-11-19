@@ -24,7 +24,6 @@ from . import (
     approvals,
     breaker,
     contracts,
-    corrections,
     crawl,
     egress,
     incidents,
@@ -499,16 +498,17 @@ def _records() -> tuple[list, list, list, list]:
     )
 
 
-def _passed_lists(runs: list[dict], events: list[dict], refresh_run: str) -> set[str]:
-    """The crawl-lists runs of THIS refresh that passed: corrected status completed and list.status ok."""
-    fixed = corrections.apply(runs, events)
+def _passed_lists(
+    runs: list[dict], events: list[dict], refresh_run: str, rules: liveness.Rules = liveness.DEFAULT
+) -> set[str]:
+    """The crawl-lists runs of THIS refresh that passed: liveness.good_crawl, with nothing taken on trust."""
+    good = liveness.good_crawl(runs, events, rules, legacy=False)
     return {
         d["run_id"]
         for d in runs
         if d.get("command") == "crawl-lists"
         and (d.get("approval_ref") or {}).get("refresh_run") == refresh_run
-        and fixed[d["run_id"]]["status"] == "completed"
-        and fixed[d["run_id"]]["list_status"] == "ok"
+        and good(d["run_id"])
     }
 
 
@@ -530,7 +530,7 @@ def fetch_pool(
             sightings.setdefault((o["site"], o["ad_id"]), []).append(o)
     latest = store.latest(listings, lambda r: (r["source"]["site"], r["ad_id"]), "fetched_at")
     if refresh_run:
-        passed = _passed_lists(runs, events, refresh_run)
+        passed = _passed_lists(runs, events, refresh_run, rules)
         mine = [o["seen_at"] for o in observations if o.get("crawl_id") in passed]
         as_of = max(mine) if mine else as_of
 

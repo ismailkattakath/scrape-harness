@@ -22,9 +22,9 @@ States:
   Precedence when several hold: tombstoned, quarantined, held.
 
 Live sightings: a list card (an observation's seen_at) from a GOOD crawl, and an OK fetch (a listing's
-fetched_at; a `reparse` is offline and proves nothing about the site). A crawl is good unless its corrected
-status or its `list.status` is in the bad sets (`Rules`). A crawl with no run doc (a legacy or free-form
-crawl_id, or none) cannot be judged and counts as good.
+fetched_at; a `reparse` is offline and proves nothing about the site). A crawl is good when its corrected
+status and its `list.status` are in the good sets (`Rules`, `good_crawl`). A crawl with no run doc (a legacy or
+free-form crawl_id, or none), or a completed one from before list.status, cannot be judged and counts as good.
 
 Gone and parse_failed events are keyed by (site, ad_id). Events without an ad_id (written before the field)
 join by url: an observation's `ad_url` or a listing's `source.url`. A url that matches no ad, or more than
@@ -46,8 +46,12 @@ class Rules:
     """The ledger's tunables. Judgement values; a later signed policy supplies them."""
 
     readmit_after: timedelta = timedelta(hours=24)
-    bad_status: frozenset = frozenset({"aborted"})
-    bad_list_status: frozenset = frozenset({"zero_yield"})
+    # A GOOD crawl (ADR-0017 §B.2): corrected status in good_status AND list.status in good_list_status. An
+    # allowlist: every stop value (zero_yield, parse_drift, failed, blocked) and every unfinished run (stopped,
+    # running, aborted) is out, so rows persisted before a Stop never count as sightings (§B.1). Slice 2's
+    # walk modes add their passing values (anchored, end, ceiling_hit) here.
+    good_status: frozenset = frozenset({"completed"})
+    good_list_status: frozenset = frozenset({"ok"})
 
 
 DEFAULT = Rules()
@@ -169,17 +173,21 @@ class Ledger:
         ]
 
 
-def good_crawl(runs: Iterable[Mapping], events: Iterable[dict], rules: Rules = DEFAULT):
-    """crawl_id -> whether its list sightings count (the ONE rule; the planner's gate reads it too). A crawl
-    is good unless its corrected status or its list.status is in the rules' bad sets; a crawl_id with no run
-    doc, or none at all, cannot be judged and counts as good."""
+def good_crawl(runs: Iterable[Mapping], events: Iterable[dict], rules: Rules = DEFAULT, legacy: bool = True):
+    """crawl_id -> whether its list sightings count (the ONE rule; the planner's gate and the refresh's list
+    postcondition read it too). Good: its corrected status is in `rules.good_status` and its list.status in
+    `rules.good_list_status`. With `legacy` (the ledger and the standalone gate), what cannot be judged counts
+    as good: a crawl_id with no run doc, or none at all, and a completed crawl from before list.status. Without
+    it (a refresh's own steps, which always record list.status), only a judged pass counts."""
     fixed = corrections.apply(runs, events)
 
     def good(crawl_id) -> bool:
         r = fixed.get(crawl_id) if crawl_id else None
-        return r is None or (
-            r["status"] not in rules.bad_status and r["list_status"] not in rules.bad_list_status
-        )
+        if r is None:
+            return legacy
+        if r["status"] not in rules.good_status:
+            return False
+        return r["list_status"] in rules.good_list_status or (legacy and r["list_status"] is None)
 
     return good
 

@@ -59,9 +59,15 @@ ad's history, in time order, into one state:
 | `quarantined` | the ad's latest gone came from a run whose gones a correction quarantined | a later real gone, an OK fetch, or the operator |
 | `held` | a `parse_failed` after the latest live sighting, with no listing since | a listing written after it (an OK fetch or a reparse) |
 
-A crawl is **good** unless its corrected status is `aborted` or its
-`list.status` is `zero_yield`. Run corrections are read through one module,
-`corrections.py`, where the latest correction in file order wins.
+A crawl is **good** only when its corrected status is `completed` and its
+`list.status` is `ok` (`liveness.good_crawl`, an allowlist). So the rows a
+crawl kept before a stop never count as sightings: not after `parse_drift`,
+`failed`, `zero_yield` or `blocked`, and not from a run that is `stopped`,
+`running` or `aborted`. Two legacy cases cannot be judged and count as good:
+a crawl_id with no run doc, and a completed run from before `list.status`.
+A refresh's own list steps get no such benefit of the doubt. Run corrections
+are read through one module, `corrections.py`, where the latest correction in
+file order wins.
 
 ## The fresh-sighting gate
 

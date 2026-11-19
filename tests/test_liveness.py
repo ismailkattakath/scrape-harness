@@ -135,6 +135,33 @@ def test_resight_from_a_bad_crawl_never_readmits():
     assert state(o, [], ev, runs) == "tombstoned"
 
 
+@pytest.mark.parametrize(
+    ("status", "list_status", "good"),
+    [
+        ("completed", "ok", True),  # the one passing crawl (ADR-0017 §B.2: completed, a passing list.status)
+        ("completed", None, True),  # a completed crawl from before list.status: cannot be judged, counts
+        ("stopped", "parse_drift", False),  # exit 14: page-1 rows kept before the stop, never a reference
+        ("stopped", "failed", False),  # exit 14 (a handler contract error) or 13 (a lost page): stopped
+        ("stopped", "zero_yield", False),
+        ("stopped", "blocked", False),  # exit 13: robots.txt left a hole in the walk
+        ("stopped", None, False),  # a challenge, an interrupt, a ceiling: rows before a Stop (§B.1)
+        ("running", None, False),  # in progress, or a process that died: not a finished read
+        ("aborted", None, False),
+        ("completed", "zero_yield", False),
+    ],
+)
+def test_a_good_crawl_is_completed_with_a_passing_list_status(status, list_status, good):
+    runs = [run_doc("L", status, list_status)]
+    assert liveness.good_crawl(runs, [])("L") is good
+    assert liveness.good_crawl(runs, [])("no-doc") is True  # no run doc: cannot be judged, counts
+
+
+def test_a_correction_decides_whether_a_crawl_is_good():
+    runs = [run_doc("L", "stopped", "ok")]  # e.g. interrupted after its last page, list.status recorded
+    assert not liveness.good_crawl(runs, [])("L")
+    assert liveness.good_crawl(runs, [correction("L", "status", {"status": "completed"})])("L")
+
+
 def test_good_sighting_is_the_latest_good_one():
     """A bad crawl's later sighting neither re-admits nor moves the tombstone's anchor."""
     runs = [*RUNS, run_doc("LISTA", "aborted")]

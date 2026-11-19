@@ -341,3 +341,30 @@ def test_a_list_page_handed_back_twice_is_still_read_before_the_walk_completes(d
     crawl.run(job, ExampleSite(), lambda m, r: read.append(r.url), FAST, None, opts(FIXTURES))
     assert read == [P1] and served(LIST) == [P1, P1, P1]  # page 1 was read in the end: no hole
     assert crawl.Run.load(job.doc["run_id"]).doc["status"] == "completed"
+
+
+@pytest.mark.parametrize("broken", ["parse_drift", "failed"])
+def test_rows_of_a_terminally_stopped_crawl_buy_no_ad_get(data_dir, tmp_path, monkeypatch, broken):
+    """A crawl the harness itself declared untrustworthy (exit 14) kept its page-1 rows: a standalone fetch-ads
+    must not plan from them (liveness.good_crawl: completed with a passing list.status)."""
+    if broken == "parse_drift":
+        d = fixtures(tmp_path, {P1: "nopager.html"}, [("nopager.html", NO_PAGER)])
+        args = ["crawl-lists", "--subcategory", "widgets", "--stride", "2", *fix(d)]
+    else:  # page 1 is written, then page 3's handler raises a contract error
+        d = fixtures(tmp_path)
+        real = store.append
+
+        def append(kind, records):
+            if kind == "observations" and any(o["list"]["page"] == 3 for o in records):
+                raise contracts.ContractError("synthetic: observation.v1 refused")
+            return real(kind, records)
+
+        monkeypatch.setattr(store, "append", append)
+        args = ["crawl-lists", "--subcategory", "widgets", "--page-count", "3", "--stride", "2", "--start", "1",
+                *fix(d)]  # fmt: skip
+    assert main(args) == crawl.EXIT_PARSE
+    (doc,) = run_docs(data_dir)
+    assert doc["list"]["status"] == broken and store.read("observations")
+    FixtureHttpClient.log.clear()
+    assert main(["fetch-ads", *fix(d)]) == 0
+    assert served(LIST) == []
