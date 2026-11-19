@@ -296,7 +296,9 @@ def test_fetch_ads_where_every_ad_fails_to_parse_is_zero_yield_exit_14(data_dir,
     assert "zero yield" in fetch["stop"]["reason"]
     assert "breaker" not in fetch or not fetch["breaker"].get("tripped")  # the breaker did not do it
     assert [i["kind"] for i in incidents.open_ones()] == ["parse"]
-    assert not [e for e in store.read("events") if e["run_id"] == fetch["run_id"] and e["kind"] == "completed"]
+    assert not [
+        e for e in store.read("events") if e["run_id"] == fetch["run_id"] and e["kind"] == "completed"
+    ]
 
 
 def test_fetch_ads_where_one_ad_parses_is_not_zero_yield(data_dir, monkeypatch):

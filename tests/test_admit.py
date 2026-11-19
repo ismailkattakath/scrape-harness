@@ -293,7 +293,8 @@ def test_the_postcondition_refuses_more_revisits_than_ceil_rho_b():
     bad = plan.assert_admissible(plans, observations, listings, [], iso(BASE), POL, 5)
     assert bad == ["2 revisit(s) planned (ads with a listing), above the cap ceil(rho * B) = 1 for B = 5"]
     assert plan.assert_admissible(plans[:1], observations, listings, [], iso(BASE), POL, 5) == []
-    assert plan.assert_admissible(plans, observations, listings, [], iso(BASE), POL) == []  # no B: not checked
+    # without B the rule is not checked
+    assert plan.assert_admissible(plans, observations, listings, [], iso(BASE), POL) == []
 
 
 @pytest.mark.parametrize("n", [10, 33, 100])
