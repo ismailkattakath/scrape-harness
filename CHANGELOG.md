@@ -63,7 +63,8 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   `parse` incident (and `gone_storm` for a breaker trip).
 - Additive, optional contract fields. run.v1 gains `stop{}`, `list{}`,
   `ads{}` and `breaker{}`. event.v1 gains `ad_id` and the kind `parse_failed`.
-  approval.v2 bounds gain `policy_digest`. Old records still validate.
+  approval.v2 bounds gain `policy_digest`, and their list sets gain `mode`,
+  `min_pages`, `k` and `policy_digest`. Old records still validate.
 - `liveness.py`: a pure per-ad ledger with four states (alive, tombstoned,
   quarantined, held). `corrections.py`: one reader of run corrections.
 - `policy.SyncPolicy`: window, revisit share, stale age, re-admission delay,
@@ -135,12 +136,6 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
 - A fetch-ads run that plans nothing prints `{"planned": 0, "ads": {...}}`,
   not `{"planned": 0}`. A consumer that matches the old line exactly must
   change.
-
-### Fixed
-
-- approval.v2's signed list set now allows `mode`, `min_pages`, `k` and
-  `policy_digest`. Before, `approve` refused a refresh plan with a walk step
-  (exit 2), because the bounds failed their own schema.
 
 ## [0.1.0] - 2026-11-13
 

@@ -216,3 +216,24 @@ def test_a_step_without_a_mode_needs_no_end_selectors(tmp_path, monkeypatch, dat
                   end_source=False)  # fmt: skip
     b, _ = refresh.build_bounds()
     assert "mode" not in approvals.signed_lists(b)[0]
+
+
+# ── the summary's and the card's words ──────────────────────────────────────────────────────────────
+def test_the_summary_line_of_an_anchored_frontier_names_its_anchor():
+    lst = {"mode": "frontier", "status": "anchored", "pages_read": 4, "ceiling": 9, "observations_written": 7,
+           "anchor": {"page": 3, "confirm_page": 4, "ref_crawl_id": "c0"}}  # fmt: skip
+    assert refresh.list_words(lst) == (
+        "crawl-lists list (frontier walk): anchored, 4 pages read of 9, 7 observations written; anchored at page 3"
+    )
+    # a step with no mode reads exactly as before
+    assert refresh.list_words({"status": "ok", "observations_written": 2}) == (
+        "crawl-lists list: ok, 2 observations written"
+    )
+
+
+def test_the_card_line_of_a_census_names_its_min_pages():
+    b = {"site": "example.invalid", "lists": [{"subcategory": "widgets", "mode": "walk", "max_pages": 9,
+                                               "min_pages": 4}, {"subcategory": "gadgets", "max_pages": 3}]}  # fmt: skip
+    assert refresh.list_step_lines(b) == [
+        "list step (1) widgets: census walk, at most 9 list GETs, at least 4 pages; passes only on a positive END"
+    ]
