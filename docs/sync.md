@@ -130,10 +130,22 @@ run refuses with exit 10 and appends nothing.
 | `readmit_h` | 24 | how long after a gone a list sighting may re-admit the ad |
 | `breaker_p0`, `breaker_alpha`, `breaker_floor` | 0.10, 1e-4, 5 | the breaker's trip rule |
 | `parse_streak` | true | ad parse failures count across a site's runs, up to `breaker_floor` |
-| `lanes` | `select_ads.v1` | the version of the lane and order rules |
+| `lanes` | `select_ads.v2` | the version of the selection rules in code |
 
 These are judgement values, not measured ones. Changing one is an operator
 decision, and the change moves the digest.
+
+The digest also covers the rules themselves, because a refresh's bounds sign
+only the digest:
+
+- **Rule constants** are digested directly: the good-crawl status sets, the
+  gone reasons that count as the site's own statement, and the revisit
+  lane's reasons (`SyncPolicy.rule_constants`).
+- **Rule code** (the gate, the lanes and their order, the ledger's fold,
+  the breaker, admission) is versioned by `lanes`. A test pins each `lanes`
+  value to a fingerprint of that code: the AST, with docstrings stripped.
+  A code change fails the suite until `lanes` is bumped. A comment or a
+  reformat does not.
 
 ## Guards that make tombstones safe
 

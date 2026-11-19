@@ -52,6 +52,10 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
 - `cli.fetch_plan` was removed. Use `cli.fetch_pool` and the selection.
 - Gone events carry `ad_id`. A consumer's golden digests need re-recording
   when it bumps its harness pin.
+- `SyncPolicy`'s digest now also covers the selection rules' constants, and
+  `lanes` is `select_ads.v2`, pinned by a test to a fingerprint of the rule
+  code. Plans and refresh approvals signed under the old digest no longer
+  match (exit 10): plan them again.
 - A fetch-ads run that plans nothing prints `{"planned": 0, "ads": {...}}`,
   not `{"planned": 0}`. A consumer that matches the old line exactly must
   change.

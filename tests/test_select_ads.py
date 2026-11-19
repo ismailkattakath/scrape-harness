@@ -58,6 +58,76 @@ def test_every_policy_field_changes_the_digest(field):
 
 
 @pytest.mark.parametrize(
+    ("module", "name", "other"),
+    [
+        ("liveness", "DEFAULT", lambda r: dataclasses.replace(r, good_status=r.good_status | {"stopped"})),
+        (
+            "liveness",
+            "DEFAULT",
+            lambda r: dataclasses.replace(r, good_list_status=r.good_list_status | {"x"}),
+        ),
+        ("breaker", "POSITIVE", lambda v: (*v, "served_list")),
+        ("plan", "REVISIT", lambda v: v[:1]),
+    ],
+)
+def test_the_digest_covers_the_rule_constants_in_code(monkeypatch, module, name, other):
+    """A refresh's bounds sign only the digest: a rule constant that is not in it could change between the
+    approval and a resume, and the step would select ads by rules the operator never approved."""
+    import importlib
+
+    mod = importlib.import_module(f"scrape_harness.{module}")
+    before = P.digest()
+    monkeypatch.setattr(mod, name, other(getattr(mod, name)))
+    assert P.digest() != before
+
+
+# The rule CODE (not its constants) is versioned by SyncPolicy.lanes, which the digest covers. This pins
+# that version to a fingerprint of the code: change any of these functions and this test fails until
+# `lanes` is bumped (a new key here), so a rule change can never ride under an old signature.
+RULE_CODE = [
+    ("plan", "fetch_reason"), ("plan", "eligible"), ("plan", "select_ads"), ("plan", "_equal"),
+    ("plan", "_largest_remainder"), ("plan", "stratified_sample"), ("plan", "sample_lanes"), ("plan", "admit"),
+    ("liveness", "good_crawl"), ("liveness", "_fold"), ("liveness", "build"), ("adkey", "event_key"),
+    ("adkey", "url_index"), ("breaker", "_threshold"), ("breaker", "weak"), ("breaker", "parse_streak"),
+    ("breaker", "Breaker"), ("cli", "fetch_pool"), ("cli", "never_opened"), ("cli", "_select"),
+]  # fmt: skip
+PINNED = {"select_ads.v2": "sha256:2068f7a7a2a0263d46a8d8833e5684a2a34c80064796273b57910f57b76f1942"}
+
+
+def rule_fingerprint() -> str:
+    """sha256 over the AST of RULE_CODE, docstrings stripped: formatting and comments never move it."""
+    import ast
+    import hashlib
+    import importlib
+    import inspect
+    import textwrap
+
+    h = hashlib.sha256()
+    for module, name in RULE_CODE:
+        obj = getattr(importlib.import_module(f"scrape_harness.{module}"), name)
+        tree = ast.parse(textwrap.dedent(inspect.getsource(obj)))
+        for node in ast.walk(tree):
+            body = getattr(node, "body", None)
+            first = body[0] if isinstance(body, list) and body else None
+            if (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+            ):
+                node.body = body[1:] or [ast.Pass()]
+        h.update(f"{module}.{name}\n{ast.dump(tree)}\n".encode())
+    return "sha256:" + h.hexdigest()
+
+
+def test_the_lanes_version_is_pinned_to_the_rule_code():
+    got = rule_fingerprint()
+    assert PINNED.get(P.lanes) == got, (
+        f"the selection rule code changed (fingerprint {got}): bump SyncPolicy.lanes and pin the new "
+        f"version here; the old signature must not cover new rules"
+    )
+
+
+@pytest.mark.parametrize(
     "rho, budget, cap",
     [(0.2, 300, 60), (0.07, 100, 7), (0.1, 30, 3), (0.2, 1, 1), (0.2, 0, 0), (0.3, 10, 3), (0, 300, 0)],
 )

@@ -17,7 +17,12 @@ Fields (judgement values; changing one is an operator decision):
   parse_streak   zero-yield ad parse failures count ACROSS a site's fetch-ads runs: a run that parsed nothing
                  and brings the streak since the last parsed ad to breaker_floor ends exit 14 (breaker.py).
                  True (operator decision, 2026-11-19).
-  lanes          the version of select_ads' lane and order rules, so a rule change is a policy change."""
+  lanes          the version of the selection rules in CODE (the gate, the lanes and their order, the ledger's
+                 fold, the breaker, admission): a test pins it to a fingerprint of that code, so changing the
+                 code fails the suite until this is bumped. v2: the good-crawl allowlist, the shared adkey join
+                 and the cross-run parse streak (2026-11-19).
+The digest also covers the rules' constants in code (`rule_constants`). A refresh's bounds sign only the
+digest, so a rule that is not in it could change between an approval and a resume unnoticed."""
 
 from __future__ import annotations
 
@@ -40,7 +45,7 @@ class SyncPolicy:
     breaker_alpha: float = 1e-4
     breaker_floor: int = 5
     parse_streak: bool = True
-    lanes: str = "select_ads.v1"
+    lanes: str = "select_ads.v2"
 
     def __post_init__(self) -> None:
         if not 0 <= self.rho <= 1:
@@ -66,8 +71,23 @@ class SyncPolicy:
 
         return dataclasses.replace(liveness.DEFAULT, readmit_after=timedelta(hours=self.readmit_h))
 
+    def rule_constants(self) -> dict:
+        """The selection rules' CONSTANTS in code, signed with the tunables: the good-crawl status sets
+        (liveness.Rules), the gone reasons that are the site's own statement (breaker.POSITIVE) and the revisit
+        lane's reasons (plan.REVISIT). The rule CODE is versioned by `lanes`, which a test pins to it."""
+        from . import breaker, plan
+
+        r = self.rules()
+        return {
+            "good_status": sorted(r.good_status),
+            "good_list_status": sorted(r.good_list_status),
+            "positive_gone": sorted(breaker.POSITIVE),
+            "revisit": list(plan.REVISIT),
+        }
+
     def doc(self) -> dict:
-        return dataclasses.asdict(self)
+        """What the digest covers: every tunable, plus the rule constants."""
+        return dataclasses.asdict(self) | {"rules": self.rule_constants()}
 
     def digest(self) -> str:
         text = json.dumps(self.doc(), sort_keys=True, separators=(",", ":"))
