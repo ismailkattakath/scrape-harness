@@ -29,6 +29,7 @@ from . import (
     browser,
     challenge,
     contracts,
+    corrections,
     egress,
     incidents,
     pipeline,
@@ -584,12 +585,8 @@ def append_correction(**kw) -> dict:
 
 def corrected_statuses() -> dict[str, str]:
     """run_id -> the status its latest `status` run_correction reconciled. The run record is never
-    rewritten, so every reader of a run's status asks `status_of`."""
-    return {
-        e["run_id"]: e["correction"]["reconciled"]["status"]
-        for e in store.read("events")
-        if e["kind"] == "run_correction" and (e.get("correction") or {}).get("field") == "status"
-    }
+    rewritten, so every reader of a run's status asks `status_of` (the rule itself: `corrections.latest`)."""
+    return {rid: r["status"] for rid, r in corrections.latest(store.read("events"), "status").items()}
 
 
 def status_of(doc: dict) -> str:
@@ -926,7 +923,10 @@ async def _crawl(
             runlog.LOG.info(
                 "gone %s (%s)", ctx.request.url, reason, extra={"event": "gone", "reason": reason}
             )
-            return  # nothing to parse; the ad is no longer listed, and later revisits skip it
+            # Nothing to parse: the ad page is gone. The gone event is the ad's tombstone in `liveness`
+            # (joined by url while it carries no ad_id); no planner reads that ledger yet, so nothing here
+            # stops a later plan from listing the ad again.
+            return
         if reason:
             stopped.append(_challenge(job, ctx.request.url, reason, res, n_hops))
             crawler.stop(f"challenge: {reason}")
