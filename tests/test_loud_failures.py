@@ -4,6 +4,7 @@ second GET is a second view of a real person's ad), and a list walk that lost a 
 Every test runs the offline fixture backend over SYNTHETIC pages and counts the GETs it actually served.
 """
 
+import errno
 import json
 
 import pytest
@@ -90,11 +91,21 @@ def test_a_handler_stop_is_recorded_terminal_and_sends_nothing_more(data_dir, co
     assert doc["stop"]["code"] == crawl.EXIT_PARSE and "cannot be trusted" in doc["stop"]["reason"]
 
 
-def test_a_data_dir_error_mid_run_is_resumable_exit_4_and_keeps_the_request_pending(data_dir):
+# A write the DATA root refuses mid-run: the store's own refusal, or the OS's (a full disk, a permission
+# error, a cloud-sync mount that went away). Both are resumable; neither is a parse failure.
+REFUSED = [
+    store.DataDirError("the data folder went away"),
+    OSError(errno.ENOSPC, "No space left on device"),
+    PermissionError(errno.EACCES, "Permission denied"),
+]
+
+
+@pytest.mark.parametrize("err", REFUSED, ids=type)
+def test_a_data_dir_error_mid_run_is_resumable_exit_4_and_keeps_the_request_pending(data_dir, err):
     job = crawl.Run.new("crawl-lists", "desktop", "example.invalid")
 
     def handle(m, r):
-        raise store.DataDirError("the data folder went away")
+        raise err
 
     with pytest.raises(crawl.Stop) as e:
         crawl.run(job, ExampleSite(), handle, FAST, lists(P1, P3), opts(FIXTURES))
@@ -223,13 +234,14 @@ def test_an_ad_parse_failure_is_one_get_one_event_and_the_run_goes_on(data_dir, 
     assert not [e for e in store.read("events") if e["kind"] == "failed_request"]
 
 
-def test_a_data_dir_error_in_the_ad_handler_is_exit_4_after_one_get(data_dir, monkeypatch):
+@pytest.mark.parametrize("err", REFUSED, ids=type)
+def test_a_data_dir_error_in_the_ad_handler_is_exit_4_after_one_get(data_dir, monkeypatch, err):
     _crawl_and_plan(FIXTURES)
     real = store.append
 
     def append(kind, records):
         if kind == "listings":
-            raise store.DataDirError("the data folder went away")
+            raise err
         return real(kind, records)
 
     monkeypatch.setattr(store, "append", append)

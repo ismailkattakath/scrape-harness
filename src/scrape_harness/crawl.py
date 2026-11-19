@@ -72,8 +72,8 @@ EXIT_UNREACHABLE, EXIT_INCOMPLETE = 12, 13
 # what came back cannot be trusted. Terminal, never resumed into a reference crawl; it opens a `parse`
 # incident (a breaker trip a `gone_storm` one). Not a challenge, so it never counts toward the cooldown.
 EXIT_PARSE = 14
-# 4: the DATA root refused a write mid-run (store.DataDirError, the CLI's EXIT_CONFIG). Resumable: the page
-# whose rows could not be written is handed back to the queue, so a resume reads it again.
+# 4: the DATA root refused a write mid-run (store.DataDirError, or an OSError from a store write: a full disk,
+# a permission error, a sync mount gone away; the CLI's EXIT_CONFIG). Resumable: the page whose rows could not be written is handed back to the queue, so a resume reads it again.
 EXIT_DATA = 4
 UNREACHABLE_AFTER = 5  # consecutive page attempts with no response at all (timeouts, refused connections)
 
@@ -992,11 +992,12 @@ async def _crawl(
             crawler.stop(f"challenge: {reason}")
             raise ChallengeDetected(reason)  # crawlee reclaims the request: it stays pending for resume
         # The handler's own failures never reach crawlee: it would retry them (a second GET, for an ad page
-        # a second view) and then record the run `completed`. Order matters: a DataDirError or a Stop is
-        # never mistaken for a parse failure.
+        # a second view) and then record the run `completed`. Order matters: a refused write or a Stop is
+        # never mistaken for a parse failure. A refused write is the store's DataDirError or the OS's own
+        # OSError from a store write (a full disk, a permission error, a cloud-sync mount gone away).
         try:
             new = handle(dict(ctx.request.user_data), res)
-        except store.DataDirError as e:  # resumable: the page is handed back, the resume reads it again
+        except (store.DataDirError, OSError) as e:  # resumable: the page is handed back, the resume reads it
             halt(Stop(EXIT_DATA, f"STOPPED: the data folder refused a write ({e}); fix it, then "
                                  f"`{pipeline.consumer().cli} crawl resume`"), "data folder")  # fmt: skip
             raise ChallengeDetected("data folder") from None  # crawlee reclaims the request: still pending
