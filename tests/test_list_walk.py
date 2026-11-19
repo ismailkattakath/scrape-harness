@@ -7,6 +7,7 @@ clamped`), or before `--min-pages` (`short_census`, exit 14). Every test runs th
 SYNTHETIC pages and counts the GETs it actually served.
 """
 
+import dataclasses
 import json
 
 import pytest
@@ -16,7 +17,7 @@ from test_approvals import networked, operator_key, plan_hash  # noqa: F401 - fi
 from test_list_snapshots import crawl_lists, list_gets
 from test_loud_failures import fix, fixtures, run_docs
 
-from scrape_harness import approvals, cli, contracts, crawl, liveness, refresh, store
+from scrape_harness import approvals, cli, contracts, crawl, liveness, policy, refresh, store
 from scrape_harness.cli import main
 from scrape_harness.drivers.fixture import FixtureHttpClient
 
@@ -171,11 +172,37 @@ def test_clamp_to_last(data_dir, tmp_path, marker):
 
 
 def test_redirect_to_page1(data_dir, tmp_path, marker):
-    """A past-end page that serves page 1's cards again is a clamp, not new content."""
-    d = site(tmp_path, [THREE[0], THREE[1], THREE[0]], end=None)
+    """A past-end page that redirects to page 1 serves page 1's cards again: a clamp, not new content."""
+    d = site(tmp_path, THREE[:2], end=None)
+    urls = json.loads((d / "urls.json").read_text())
+    (d / "urls.json").write_text(json.dumps(urls | {P(3): {"file": "walk-1.html", "final_url": P(1)}}))
     assert walk(d) == 0
+    assert list_gets() == [P(1), P(2), P(3)]
+    doc = the_doc(data_dir)
+    assert doc["list"]["end_method"] == "clamped" and doc["list"]["end_page"] == 2
+    assert sorted({o["list"]["page"] for o in rows(doc)}) == [1, 2]
+
+
+def test_a_page_read_again_is_not_a_clamp_of_itself(data_dir, tmp_path, marker, monkeypatch):
+    """A page whose rows were kept but whose walk state was not saved is read again by the resume: its own ids
+    are not "seen earlier in this walk", so it never clamps the walk at the page before it."""
+    real, raised = crawl.Run.save, []
+
+    def flaky(self):
+        if (self.doc.get("list") or {}).get("pages_read") == 2 and not raised:
+            raised.append(1)
+            raise OSError("synthetic: the data folder went away")
+        return real(self)
+
+    monkeypatch.setattr(crawl.Run, "save", flaky)
+    d = site(tmp_path, THREE)
+    assert walk(d) == crawl.EXIT_DATA
+    rid = the_doc(data_dir)["run_id"]
+    FixtureHttpClient.log.clear()
+    assert main(["crawl", "resume", "--run-id", rid, *fix(d)]) == 0
+    assert list_gets() == [P(2), P(3), P(4)]
     lst = the_doc(data_dir)["list"]
-    assert lst["end_method"] == "clamped" and lst["end_page"] == 2
+    assert lst["status"] == "end" and lst["end_method"] == "end_marker" and lst["end_page"] == 3
 
 
 def test_half_repeated_is_not_a_clamp(data_dir, tmp_path, marker):
@@ -253,6 +280,17 @@ def test_mode_and_min_pages_move_the_plan_hash(networked, capsys):  # noqa: F811
     doc = approvals.load_plan(short)
     assert doc["mode"] == "walk" and doc["min_pages"] == 2 and doc["stride"] == 1
     assert approvals.list_args(doc)["mode"] == "walk" and approvals.list_args(doc)["min_pages"] == 2
+
+
+def test_a_walk_plan_signs_the_policy_digest(networked, capsys, monkeypatch):  # noqa: F811
+    """A walk is judged by the good-crawl rules (liveness.Rules, in the policy digest): its plan signs the
+    digest, so a rule change between the approval and the run is another plan. Only walks: older plans hash
+    as before."""
+    walked = plan_hash(capsys, [*BASE, "--mode", "walk"])
+    assert approvals.load_plan(walked)["policy_digest"] == policy.DEFAULT.digest()
+    assert "policy_digest" not in approvals.load_plan(plan_hash(capsys, BASE))
+    monkeypatch.setattr(policy, "DEFAULT", dataclasses.replace(policy.DEFAULT, lanes="select_ads.test"))
+    assert plan_hash(capsys, [*BASE, "--mode", "walk"]) != walked
 
 
 def test_a_walk_step_doc_signs_max_pages_list_gets():
@@ -336,15 +374,16 @@ def test_resume_after_failed_page_within_ceiling(data_dir, tmp_path, marker):
     assert lst["status"] == "ceiling_hit" and lst["settled"] == 4 and lst["pages_read"] == 3
 
 
-def test_a_walk_whose_ceiling_is_spent_is_not_resumed(data_dir, tmp_path, marker):
+def test_a_walk_whose_ceiling_is_spent_is_not_resumed(data_dir, tmp_path, marker, capsys):
     d = site(tmp_path, THREE)
     urls = json.loads((d / "urls.json").read_text())
     (d / "urls.json").write_text(json.dumps(urls | {P(2): {"file": "walk-2.html", "status": 500}}))
     assert walk(d, "--max-pages", "2") == crawl.EXIT_INCOMPLETE
     FixtureHttpClient.log.clear()
     rid = the_doc(data_dir)["run_id"]
+    capsys.readouterr()
     assert main(["crawl", "resume", "--run-id", rid, *fix(d)]) == crawl.EXIT_INCOMPLETE
-    assert list_gets() == []
+    assert list_gets() == [] and "settled its signed ceiling of 2" in capsys.readouterr().err
 
 
 # ── which walk outcomes are GOOD crawls (ADR-0017 §B.2) ────────────────────────────────────────────────
@@ -390,10 +429,13 @@ def test_a_refresh_walk_step_signs_mode_and_min_pages_and_bounds_max_pages(
     from test_refresh import make_pipeline
 
     p = make_pipeline(tmp_path, monkeypatch, operator_key["fp"], steps=("crawl-lists",))
-    p.write_text(p.read_text().replace('"--stride", "2", "--start", "1"', '"--mode", "walk", "--min-pages", "2"'))
+    p.write_text(
+        p.read_text().replace('"--stride", "2", "--start", "1"', '"--mode", "walk", "--min-pages", "2"')
+    )
     b, _ = refresh.build_bounds()
     (lst,) = approvals.signed_lists(b)
     assert lst["mode"] == "walk" and lst["min_pages"] == 2 and lst["stride"] == 1
+    assert lst["policy_digest"] == policy.DEFAULT.digest()
     assert b["max_list_pages"] == lst["max_pages"]
     assert "a census walk, at least 2 pages" in approvals.bounded_text(b)
     step = cli._step_doc({"command": "crawl-lists", **lst})  # noqa: SLF001

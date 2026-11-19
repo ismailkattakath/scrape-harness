@@ -38,7 +38,8 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   page-count discovery. It stops at a positive END (`end_page` exact), a clamp
   (`end_method: clamped`), or its signed ceiling of `--max-pages` list GETs
   (`ceiling_hit`). `--min-pages N` (signed): an END before N pages is
-  `short_census`, exit 14. `mode` and `min_pages` are signed only when set,
+  `short_census`, exit 14. `mode`, `min_pages` and (for a walk) the policy
+  digest are signed only when set,
   and a walk step's bounds count `max_pages` list GETs (no `1 +`). A resume
   continues from the next unread page within what the ceiling leaves.
   run.v1 `list` gains `end_read_page`, `mode`, `stride`, `ceiling`,

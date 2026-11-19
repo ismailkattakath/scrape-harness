@@ -342,7 +342,9 @@ is prefetched.
 
 - **Signed.** `mode` and `min_pages` join the plan (`run_plan`) and a
   refresh's signed list set (`approvals.LIST_KEYS_IF_SET`) only when set, so a
-  plan without them hashes as before. A refresh's bounds count exactly
+  plan without them hashes as before. A walk also signs `policy_digest`
+  (`policy.DEFAULT`): its outcome is judged by the good-crawl rules, which the
+  digest covers, so a rule change after the approval is a different plan. A refresh's bounds count exactly
   `max_pages` list GETs for a walk step (no `1 +` discovery allowance), and the
   operator's text says "a census walk".
 - **Refused with it:** `--stride` other than 1 (the stride-k depth walk, H4, is
@@ -360,7 +362,9 @@ is prefetched.
   by what the signed ceiling leaves (`ceiling - settled`), never by the resume's
   own `--max-pages`, and its plan binds `mode`, `ceiling` and `settled`. A walk
   that already settled its ceiling is refused (exit 13). The clamp guard's
-  memory is this crawl's own rows in DATA, so a resume still sees earlier ids.
+  memory is this crawl's own rows in DATA, by the lowest page each id was kept
+  on: a resume still sees earlier ids, and a page read again (its rows were
+  kept, its state was not saved) is never a repeat of itself.
 - **Good crawls.** `end` and `ceiling_hit` are good: every page read is a true
   sighting (a `ceiling_hit` leaves the rest of the list unread, the GAP of
   ADR-0017 A.3, recorded by the frontier step). `short_census` and

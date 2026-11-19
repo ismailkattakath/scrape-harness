@@ -718,9 +718,9 @@ def consume_standing(
 MAX_BOUNDED = timedelta(hours=24)
 BOUNDED_TIMES = ("not_before", "expires_at")
 LIST_KEYS = ("subcategory", "region", "page_count", "stride", "start", "seed", "max_pages")
-# Signed only when set (explicit pages, list snapshots, the census walk and its --min-pages): a set signed
-# before they existed reads the same.
-LIST_KEYS_IF_SET = ("pages", "snapshot", "mode", "min_pages")
+# Signed only when set (explicit pages, list snapshots, the census walk, its --min-pages and the policy digest
+# a walk is judged by): a set signed before they existed reads the same.
+LIST_KEYS_IF_SET = ("pages", "snapshot", "mode", "min_pages", "policy_digest")
 
 
 def list_args(x) -> dict:

@@ -225,6 +225,8 @@ def build_bounds(ttl: str = DEFAULT_TTL, max_ad_requests: int | None = None) -> 
                 cli._deterministic(ns)  # noqa: SLF001 - the signed sample is the one crawled
             cli._check_pages(ns)  # noqa: SLF001
             cli._check_walk(ns)  # noqa: SLF001
+            if cli._walk(ns):  # noqa: SLF001 - the rules a walk is judged by, as its run_plan signs them
+                ns.policy_digest = policy.DEFAULT.digest()
             lists.append(approvals.list_args(ns))  # one signed set per step
             if ns.pages:
                 max_lists += len(ns.pages)

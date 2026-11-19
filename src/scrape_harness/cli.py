@@ -74,13 +74,15 @@ def _polite(args: argparse.Namespace) -> crawl.Politeness:
 
 
 def list_handler(job: crawl.Run, source, max_pages: int):
-    seen: set[str] | None = None  # a walk's ad ids so far, for the clamp guard: this crawl's own rows
+    seen: dict[str, int] | None = None  # a walk's ad id -> the lowest page it was kept on: this crawl's rows
 
-    def walk_seen() -> set[str]:
+    def walk_seen() -> dict[str, int]:
         nonlocal seen
         if seen is None:  # once per attempt, from DATA: a resume sees the ids of the pages read before it
-            rid = job.doc["run_id"]
-            seen = {o["ad_id"] for o in store.read("observations") if o.get("crawl_id") == rid}
+            rid, seen = job.doc["run_id"], {}
+            for o in store.read("observations"):
+                if o.get("crawl_id") == rid:
+                    seen[o["ad_id"]] = min(seen.get(o["ad_id"], o["list"]["page"]), o["list"]["page"])
         return seen
 
     def ended(lst: dict, m: dict, method: str) -> None:
@@ -146,13 +148,14 @@ def list_handler(job: crawl.Run, source, max_pages: int):
                              "and no end marker")  # fmt: skip
         # a census walk: no pager is read (a windowed pager gives no count), weight 1, one page ahead
         if walk:
-            ids = [o["ad_id"] for o in lp.observations]
-            known = walk_seen()
-            if 2 * sum(1 for i in ids if i in known) > len(ids):  # the clamp guard: repeats, not new content
+            ids, known = [o["ad_id"] for o in lp.observations], walk_seen()
+            # the clamp guard: ids kept on an EARLIER page (a page read again by a resume is not its own repeat)
+            if 2 * sum(1 for i in ids if known.get(i, m["page"]) < m["page"]) > len(ids):
                 ended(lst, m, "clamped")  # its cards are earlier pages' cards again: none is kept
                 return walked(lst, m)
             keep(lp.observations, None, 1)
-            known.update(ids)
+            for i in ids:
+                known.setdefault(i, m["page"])
             return walked(lst, m)
         new: list[dict] = []
         weight = m.get("sample_weight")
@@ -577,6 +580,8 @@ def cmd_crawl_lists(args: argparse.Namespace) -> int:
             **({"snapshot": True} if args.snapshot else {}),
             **({"mode": args.mode} if args.mode else {}),
             **({"min_pages": args.min_pages} if args.min_pages is not None else {}),
+            # a walk's outcome is judged by the good-crawl rules, which the policy digest covers
+            **({"policy_digest": policy.DEFAULT.digest()} if _walk(args) else {}),
         ),
         [variant],
     )
