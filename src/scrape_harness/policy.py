@@ -14,6 +14,9 @@ Fields (judgement values; changing one is an operator decision):
   readmit_h      a list sighting re-admits a tombstoned ad only this long after the gone (liveness). 24.
   breaker_*      the gone-storm and ad-failure breaker (p0, alpha, floor): breaker.py's trip rule, which every
                  fetch-ads run (and supersede) is passed.
+  parse_streak   zero-yield ad parse failures count ACROSS a site's fetch-ads runs: a run that parsed nothing
+                 and brings the streak since the last parsed ad to breaker_floor ends exit 14 (breaker.py).
+                 True (operator decision, 2026-11-19).
   lanes          the version of select_ads' lane and order rules, so a rule change is a policy change."""
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ class SyncPolicy:
     breaker_p0: float = 0.10
     breaker_alpha: float = 1e-4
     breaker_floor: int = 5
+    parse_streak: bool = True
     lanes: str = "select_ads.v1"
 
     def __post_init__(self) -> None:

@@ -250,3 +250,79 @@ def test_a_refused_gone_write_still_counts_and_a_trip_on_it_wins(data_dir, tmp_p
     assert len(ad_gets()) == 5  # no retry of the fifth
     (doc,) = fetch_docs(data_dir)
     assert doc["breaker"]["g"] == 5 and doc["stop"]["code"] == crawl.EXIT_PARSE
+
+
+# ── zero-yield parse failures count ACROSS runs (operator decision, 2026-11-19) ─────────────────────
+
+
+@pytest.fixture
+def broken_parser(monkeypatch):
+    from example_site.source import ExampleSite
+
+    real = ExampleSite.parse_ad
+    state = {"broken": True}
+
+    def parse_ad(self, html, **kw):
+        if state["broken"]:
+            raise AttributeError("synthetic parser break")
+        return real(self, html, **kw)
+
+    monkeypatch.setattr(ExampleSite, "parse_ad", parse_ad)
+    return state
+
+
+def in_run_order(docs):
+    """Run docs in the order the event log first names them (created_at has whole seconds only)."""
+    first = {}
+    for i, e in enumerate(store.read("events")):
+        first.setdefault(e["run_id"], i)
+    return sorted(docs, key=lambda d: first[d["run_id"]])
+
+
+def run_fetch(tmp_path, n, offset):
+    """One fetch-ads run over n NEW, freshly sighted ads (a held ad is never planned again)."""
+    rows = sighted(n, offset)
+    FixtureHttpClient.log.clear()
+    code = main(["fetch-ads", *fix(pages(tmp_path, rows, [False] * n))])
+    assert len(ad_gets()) == n  # never a retry
+    return code
+
+
+def test_one_failed_ad_is_never_terminal_on_its_own(data_dir, tmp_path, broken_parser):
+    assert run_fetch(tmp_path, 1, 0) == 0
+    (doc,) = fetch_docs(data_dir)
+    assert doc["status"] == "completed" and doc["ads"]["ok"] == 0 and doc["ads"]["parse_streak"] == 1
+    assert incidents.open_ones() == []
+
+
+def test_a_zero_yield_streak_across_runs_reaching_the_floor_is_exit_14(data_dir, tmp_path, broken_parser):
+    """2 + 2 failed pages stay under the floor (5); the next run's ONE failure makes 5: loud, terminal."""
+    assert run_fetch(tmp_path, 2, 0) == 0
+    assert run_fetch(tmp_path, 2, 10) == 0
+    assert run_fetch(tmp_path, 1, 20) == crawl.EXIT_PARSE
+    docs = in_run_order(fetch_docs(data_dir))
+    assert [d["ads"]["parse_streak"] for d in docs] == [2, 4, 5]
+    last = docs[-1]
+    assert last["status"] == "stopped" and last["stop"]["code"] == crawl.EXIT_PARSE
+    assert "5 ad pages" in last["stop"]["reason"] and "breaker" not in last  # no latch, no quarantine
+    assert [i["kind"] for i in incidents.open_ones()] == ["parse"]
+    assert main(["crawl", "resume", "--run-id", last["run_id"], *fix(tmp_path / "fx0")]) == crawl.EXIT_PARSE
+
+
+def test_a_parsed_ad_in_between_resets_the_streak(data_dir, tmp_path, broken_parser):
+    assert run_fetch(tmp_path, 3, 0) == 0
+    broken_parser["broken"] = False
+    assert run_fetch(tmp_path, 1, 10) == 0  # ok > 0: the parser works, the streak is over
+    broken_parser["broken"] = True
+    assert run_fetch(tmp_path, 3, 20) == 0  # 3, not 6
+    assert [d["ads"]["parse_streak"] for d in in_run_order(fetch_docs(data_dir))] == [3, 0, 3]
+    assert incidents.open_ones() == []
+
+
+def test_a_run_with_no_parse_failure_never_rings_on_an_old_streak(data_dir, tmp_path, broken_parser):
+    """A gone-only run after a streak at the floor adds no failure: it does not ring (and does not reset)."""
+    assert run_fetch(tmp_path, 4, 0) == 0
+    rows = sighted(2, 10)
+    FixtureHttpClient.log.clear()
+    assert main(["fetch-ads", *fix(pages(tmp_path, rows, [True, True], gone_file="", gone_status=410))]) == 0
+    assert [d["ads"]["parse_streak"] for d in in_run_order(fetch_docs(data_dir))] == [4, 4]

@@ -9,6 +9,11 @@ computed in exact integer arithmetic (a float tail rounds near alpha). Two count
            http_404, or any reason not known to be positive). A positive marker (`POSITIVE`: the site's own
            expired notice, a 410) never counts: it is the site's statement, so a real expiry wave cannot trip.
   failure  parse_failed: an ad page that answered but could not be parsed or validated (a parser break).
+Below the floor a run cannot trip, so a broken parser could lose a small run whole and exit 0. With
+`parse_streak` on (signed), fetch-ads' postcheck therefore also counts parse failures ACROSS the site's runs
+(`parse_streak`): a run that parsed nothing, failed at least one page, and brings the streak since the last
+parsed ad to the floor ends exit 14 (a `parse` incident; no latch, no quarantine). One failed ad alone never
+does: the floor is the minimum evidence of a parser break, whichever runs it took to collect.
 With the defaults (p0 0.10, alpha 1e-4, floor 5) the threshold is g = 5 at n = 5 (a full storm trips at GET 5),
 9 at n = 20, 24 at n = 100 and 52 at n = 300; the run-level false-trip rate over 300 GETs at a true gone rate
 of 0.04 is about 1e-6 (`false_trip`, an exact DP).
@@ -107,6 +112,32 @@ class Breaker:
             "alpha": self.pol.breaker_alpha,
         }
         return self.tripped
+
+
+def parse_streak(site: str, runs: Iterable[Mapping], events: Iterable[dict]) -> int:
+    """Answered ad pages of `site` that failed to parse since its last fetch-ads run that parsed one: the
+    cross-run zero-yield streak. Derived from DATA alone (run docs and their `parse_failed` events; no counter
+    file). Walk the site's fetch-ads runs newest first, in the order the append-only event log first names
+    them (created_at has whole seconds only); a run with ads.ok > 0 ends the streak; every other run adds its
+    parse_failed events (a run with no ads{} outcome parsed nothing). A run the log never names sent nothing,
+    so where it sorts cannot change the count."""
+    failed: dict[str, int] = {}
+    first: dict[str, int] = {}
+    for i, e in enumerate(events):
+        first.setdefault(e.get("run_id"), i)
+        if e.get("kind") == "parse_failed":
+            failed[e.get("run_id")] = failed.get(e.get("run_id"), 0) + 1
+    mine = sorted(
+        (d for d in runs if d.get("command") == "fetch-ads" and d.get("source") == site),
+        key=lambda d: (first.get(d["run_id"], -1), d.get("created_at") or "", d["run_id"]),
+        reverse=True,
+    )
+    n = 0
+    for d in mine:
+        if ((d.get("ads") or {}).get("ok") or 0) > 0:
+            break
+        n += failed.get(d["run_id"], 0)
+    return n
 
 
 def latched(site: str, runs: Iterable[Mapping], events: Iterable[dict]) -> list[str]:

@@ -28,6 +28,10 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
 - The gone-storm and ad-failure breaker (`breaker.py`), with a per-site latch.
   `<cli> breaker status` and `<cli> breaker clear --approve-operator` were
   added.
+- Ad parse failures also count across a site's fetch-ads runs
+  (`breaker.parse_streak`, signed as `SyncPolicy.parse_streak`). A run that
+  parsed no ad and brings the streak since the last parsed ad to
+  `breaker_floor` ends with exit 14. run.v1 `ads{}` gains `parse_streak`.
 - Refresh postconditions. A crawl-lists step passes only on exit 0, a run doc
   with `list.status` ok, and at least one observation written. Anything else is
   recorded as exit 14 (terminal), and the strict chain never reaches fetch-ads.

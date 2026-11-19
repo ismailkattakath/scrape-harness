@@ -506,6 +506,11 @@
           "minimum": 0,
           "description": "Of ad_gets, those that wrote a gone event."
         },
+        "parse_streak": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Ad pages of this site that failed to parse since its last fetch-ads run that parsed one, this run included (breaker.parse_streak). At breaker_floor, a run that parsed nothing ends exit 14."
+        },
         "as_of": {
           "type": "string",
           "format": "date-time",

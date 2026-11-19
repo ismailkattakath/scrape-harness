@@ -41,6 +41,7 @@ the gate, with 0 GETs. It opens a `parse` incident. A breaker trip opens a
 | A list page was disallowed by robots.txt | 13 | `list.status: blocked` |
 | An ad page could not be parsed | none: the run goes on | one `parse_failed` event (with `ad_id`), no retry |
 | The data folder refused a write after a page answered | 4 (resumable) | a list page is handed back; an ad page stays done in the queue, so no resume GETs it again |
+| A fetch-ads run parsed no ad, and the site's parse failures since its last parsed ad reach `breaker_floor` | 14 | `ads.parse_streak`, `stop{}` |
 | The breaker tripped, or the site is latched | 14 | `breaker{}` on the run doc |
 
 Each stop is recorded on the run doc as `stop{code, reason}`. The ad page that
@@ -128,6 +129,7 @@ run refuses with exit 10 and appends nothing.
 | `stale_after_d` | 7 | a stored copy older than this, of an ad still listed, is due a revisit |
 | `readmit_h` | 24 | how long after a gone a list sighting may re-admit the ad |
 | `breaker_p0`, `breaker_alpha`, `breaker_floor` | 0.10, 1e-4, 5 | the breaker's trip rule |
+| `parse_streak` | true | ad parse failures count across a site's runs, up to `breaker_floor` |
 | `lanes` | `select_ads.v1` | the version of the lane and order rules |
 
 These are judgement values, not measured ones. Changing one is an operator
@@ -145,6 +147,20 @@ decision, and the change moves the digest.
     bare 404. The site's own expiry notice and a 410 never count, so a real
     wave of expiries cannot trip it.
   - The failure counter counts `parse_failed`.
+  - **Below the floor a run cannot trip**, so a small run could lose every
+    ad page to a broken parser and still exit 0. So parse failures also
+    **count across runs** (`breaker.parse_streak`, operator decision
+    2026-11-19). The streak is the site's `parse_failed` events since its
+    last fetch-ads run that parsed an ad (`ads.ok > 0`), read from the run
+    docs and the event log, newest run first in log order. There is no
+    counter file.
+  - A run rings when it parsed no ad, failed at least one page, and brings
+    the streak to `breaker_floor`. It ends with exit 14 and opens a `parse`
+    incident. A refresh treats that as terminal. It writes no `breaker{}`,
+    so nothing is latched or quarantined.
+  - One failed ad never ends a run on its own. Neither does a run with no
+    parse failure, such as a gone-only run. A run that parses one ad resets
+    the streak to 0.
   - A trip writes `breaker{}` on the run doc, quarantines that run's weak
     gones, stops the run with exit 14, and **latches** the site.
   - Every networked command and `--plan` then refuses until

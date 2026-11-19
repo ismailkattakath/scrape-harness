@@ -647,10 +647,13 @@ def selection_words(ads: dict) -> str:
     )
 
 
-def ads_outcome(planned: set[tuple]):
-    """fetch-ads' postcheck: the run's ads{} outcome (ad GETs sent, listings written, gone events)."""
+def ads_outcome(planned: set[tuple], pol: policy.SyncPolicy = policy.DEFAULT):
+    """fetch-ads' postcheck: the run's ads{} outcome (ad GETs sent, listings written, gone events) and the
+    site's cross-run parse streak (breaker.parse_streak). A run that parsed nothing, failed at least one ad
+    page, and brings the streak to breaker_floor is exit 14, terminal (policy.parse_streak); a run's own stop
+    stands, and one failed ad alone never rings."""
 
-    def check(job: crawl.Run, stop: crawl.Stop | None) -> None:
+    def check(job: crawl.Run, stop: crawl.Stop | None) -> crawl.Stop | None:
         a = job.doc.setdefault("ads", {})
         rid, since = job.doc["run_id"], job.doc["created_at"]
         a["ad_gets"] = int(job.doc.get("requests", {}).get("ad_pages", 0))
@@ -663,8 +666,19 @@ def ads_outcome(planned: set[tuple]):
                 and (r["source"]["site"], r["ad_id"]) in planned
             }
         )
-        a["gone"] = sum(1 for e in store.read("events") if e.get("run_id") == rid and e["kind"] == "gone")
-        return None
+        events = list(store.read("events"))
+        mine = [e["kind"] for e in events if e.get("run_id") == rid]
+        a["gone"] = mine.count("gone")
+        runs = [d for d in _run_docs() if d["run_id"] != rid] + [job.doc]
+        a["parse_streak"] = breaker.parse_streak(job.doc["source"], runs, events)
+        if stop is not None or not pol.parse_streak or a["ok"] or "parse_failed" not in mine:
+            return None
+        if a["parse_streak"] < pol.breaker_floor:
+            return None
+        job.doc["status"] = "stopped"
+        return crawl.Stop(crawl.EXIT_PARSE, f"STOPPED: {a['parse_streak']} ad pages of {job.doc['source']} failed "
+                          "to parse, across runs, with no ad parsed since (the ad parser is broken?); fix it, "
+                          f"then `{pipeline.consumer().cli} reparse` the saved pages")  # fmt: skip
 
     return check
 
@@ -870,7 +884,7 @@ def cmd_fetch_ads(args: argparse.Namespace) -> int:
         "selection": selection_words(sel.ads),
     }
     planned = {(o["site"], o["ad_id"]) for _, o in todo}
-    return _execute(args, job, source, ad_handler(source), reqs, card, ads_outcome(planned), pol)
+    return _execute(args, job, source, ad_handler(source), reqs, card, ads_outcome(planned, pol), pol)
 
 
 def _admitted(args, old, reqs, scope, recs, pol, source, variant, as_of: str):
@@ -948,7 +962,7 @@ def _fetch_superseding(args: argparse.Namespace, statuses: tuple[str, ...] = ("s
         "ceiling": len(kept),
     }
     planned = {(r["meta"]["site"], r["meta"]["ad_id"]) for r in kept}
-    return _execute(args, job, source, ad_handler(source), kept, card, ads_outcome(planned), pol)
+    return _execute(args, job, source, ad_handler(source), kept, card, ads_outcome(planned, pol), pol)
 
 
 def cmd_crawl_correct(args: argparse.Namespace) -> int:
