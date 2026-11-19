@@ -141,9 +141,14 @@ def planned(capsys, *extra):
     return json.loads(capsys.readouterr().out)
 
 
-def test_the_plan_signs_as_of_and_the_policy_and_a_policy_change_changes_the_hash(data_dir, capsys):
+def test_the_plan_signs_as_of_and_the_policy_and_a_policy_change_changes_the_hash(
+    data_dir, capsys, monkeypatch
+):
     crawled()
+    t0 = datetime.now(UTC)  # one plan time for every plan: as_of alone can never move the hash
+    monkeypatch.setattr(cli, "_now", lambda: t0)
     p = planned(capsys)
+    assert planned(capsys)["plan_hash"] == p["plan_hash"]  # deterministic: the same policy, the same hash
     assert p["plan"]["policy_digest"] == policy.DEFAULT.digest() and p["plan"]["as_of"]
     assert len(p["plan"]["ads"]) == 3
     for flag in (["--rho", "0.3"], ["--window-h", "48"], ["--stale-after-d", "6"]):
@@ -186,6 +191,8 @@ def test_the_run_reproduces_the_signed_as_of_29_minutes_later(networked, capsys,
 
 def test_a_policy_change_after_approval_is_refused_exit_10(networked, capsys, monkeypatch):  # noqa: F811
     offline_crawl(monkeypatch)
+    t0 = datetime.now(UTC)  # the plan and the run select at one time: only the policy differs
+    monkeypatch.setattr(cli, "_now", lambda: t0)
     capsys.readouterr()
     assert main(["fetch-ads", *NET, "--plan"]) == 0
     assert main(["approve", json.loads(capsys.readouterr().out)["plan_hash"]]) == 0
