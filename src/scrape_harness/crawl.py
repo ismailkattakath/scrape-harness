@@ -8,6 +8,8 @@ ours, by design:
     statuses are passed to our handler), so the first 403/429/503/captcha/wall/gate stops the run;
   - the SITE cooldown after two challenges for one site within an hour (across runs and A/B
     variants), challenge evidence, the run record (run.v1) and events (event.v1);
+  - the gone-storm and ad-failure BREAKER (breaker.py): a run whose ad pages look gone (or fail to parse)
+    far more often than chance trips, quarantines its doubtful gones, stops (exit 14) and latches its site;
   - refetch-on-change (plan.py): crawlee's queue dedups, it does not decide WHAT to fetch.
 
 Every backend (impit HTTP, Playwright browser, offline fixture) is a crawlee crawler behind the
@@ -26,6 +28,7 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
 from . import (
+    breaker,
     browser,
     challenge,
     contracts,
@@ -33,6 +36,7 @@ from . import (
     egress,
     incidents,
     pipeline,
+    policy,
     proxy,
     runcard,
     runlog,
@@ -83,9 +87,10 @@ def _t(s: str) -> datetime:
 
 
 class Stop(Exception):  # noqa: N818 - a control-flow signal, not an error
-    def __init__(self, code: int, message: str) -> None:
+    def __init__(self, code: int, message: str, kind: str | None = None) -> None:
         super().__init__(message)
         self.code = code
+        self.kind = kind  # the incident kind when the code alone does not say it (a breaker's gone_storm)
 
 
 class ChallengeDetected(Exception):  # noqa: N818 - raised in the handler so crawlee keeps the request
@@ -199,6 +204,26 @@ def clear_cooldown(site: str, reason: str) -> dict | None:
     }
     store.append("events", [e])
     return e
+
+
+def run_docs() -> list[dict]:
+    """Every run doc in DATA/runs (read only: nothing is created)."""
+    d = store.data_dir() / "runs"
+    return [store.read_json(p, "run.v1") for p in sorted(d.glob("*.json"))] if d.is_dir() else []
+
+
+def latch_stop(site: str) -> Stop | None:
+    """The breaker latch's refusal for `site` (exit 14), or None. Derived from DATA: a run doc with
+    breaker.tripped and no operator `breaker clear` since (breaker.latched)."""
+    runs = breaker.latched(site, run_docs(), store.read("events"))
+    if not runs:
+        return None
+    return Stop(
+        EXIT_PARSE,
+        f"refusing: {site} is latched by the gone-storm breaker of run {', '.join(runs)}; nothing is sent until "
+        f"the operator decides (`{pipeline.consumer().cli} breaker clear --site {site} --resolve keep|void "
+        "--note ... --approve-operator`)",
+    )
 
 
 def queue_name(run_id: str) -> str:
@@ -707,6 +732,7 @@ async def _crawl(
     opts: dict,
     counts: dict,
     ceiling: int | None = None,
+    pol: policy.SyncPolicy | None = None,
 ) -> Stop | None:
     from crawlee import ConcurrencySettings, service_locator
     from crawlee._utils.robots import RobotsTxtFile
@@ -839,7 +865,7 @@ async def _crawl(
             )
             status.write(job.doc, counts)  # progress after every page
 
-    def breaker(ctx, error: Exception) -> None:
+    def circuit(ctx, error: Exception) -> None:
         """Count an attempt that sent its GET and got nothing back; at UNREACHABLE_AFTER in a row, stop."""
         key = ctx.request.unique_key
         if key not in attempts.open:
@@ -884,9 +910,41 @@ async def _crawl(
         runlog.LOG.warning("parse_failed %s (%s: %s)", urlsplit(req.url).path, type(error).__name__, error,
                            extra={"event": "parse_failed", "reason": type(error).__name__})  # fmt: skip
 
+    brk = breaker.Breaker(pol or policy.DEFAULT)
+
+    def settle(req, outcome: str, reason: str | None = None) -> None:
+        """One answered ad page into the breaker; on a trip: SAVE the trip on the run doc first (the latch
+        reads it), then quarantine the run's weak gones, then stop (exit 14). Never raises: a raise here is a
+        retry, and a retry is a second view."""
+        if req.user_data.get("kind") != "ad":
+            return
+        trip = brk.settle(outcome, reason)
+        if trip is None or stopped:
+            return
+        what = "gone-storm" if trip["kind"] == "gone" else "ad-failure"
+        why = (f"STOPPED: the {what} breaker tripped: {trip['g']} of {trip['n']} answered ad pages "
+               f"{'look gone by absence or a redirect' if trip['kind'] == 'gone' else 'failed to parse'} (p0 "
+               f"{trip['p0']}, alpha {trip['alpha']}). The run's weak gones are quarantined (no tombstone) and "
+               f"{job.doc['source']} is latched until `{pipeline.consumer().cli} breaker clear --approve-operator`")  # fmt: skip
+        try:
+            job.doc["breaker"] = {**trip, "at": utcnow()}
+            job.save()
+        except Exception as e:  # noqa: BLE001 - the stop itself must still happen
+            runlog.LOG.warning("could not save the breaker trip: %s", e, extra={"event": "breaker_unsaved"})
+        try:
+            append_correction(
+                run_id=rid, field="gone", recorded={"gone_weak": brk.g["gone"], "ad_answered": brk.n},
+                reconciled={"quarantine": True, "scope": "weak"}, site=job.doc["source"],
+                note=f"{what} breaker trip: the run's weak gones are doubtful", evidence=["DATA:events.jsonl"],
+            )  # fmt: skip
+        except Exception as e:  # noqa: BLE001
+            runlog.LOG.warning("could not quarantine: %s", e, extra={"event": "quarantine_unsaved"})
+        runlog.LOG.warning(why, extra={"event": "breaker", "breaker": trip})
+        halt(Stop(EXIT_PARSE, why, kind="gone_storm" if trip["kind"] == "gone" else None), "breaker")
+
     @crawler.error_handler
     async def on_error(ctx, error: Exception) -> None:
-        breaker(ctx, error)
+        circuit(ctx, error)
         responded.discard(ctx.request.unique_key)
         attempts.errored(ctx.request.unique_key)
         log_page(ctx.request, None)
@@ -908,8 +966,10 @@ async def _crawl(
             if kind == "ad"
             else None
         )
+        ad = ctx.request.user_data.get("ad_id") or None
         if why:
-            event(rid, "gone", ctx.request.url, why, site=job.doc["source"])
+            event(rid, "gone", ctx.request.url, why, site=job.doc["source"], ad_id=ad)
+            settle(ctx.request, "gone", why)
             runlog.LOG.info(
                 "gone %s (%s, at %s)",
                 urlsplit(ctx.request.url).path,
@@ -919,13 +979,13 @@ async def _crawl(
             )
             return  # the ad was removed: the site shows its expired notice or the category list instead
         if challenge.gone(reason, bool(ctx.request.user_data.get("revisit"))):
-            event(rid, "gone", ctx.request.url, reason, site=job.doc["source"])
+            event(rid, "gone", ctx.request.url, reason, site=job.doc["source"], ad_id=ad)
+            settle(ctx.request, "gone", reason)
             runlog.LOG.info(
                 "gone %s (%s)", ctx.request.url, reason, extra={"event": "gone", "reason": reason}
             )
-            # Nothing to parse: the ad page is gone. The gone event is the ad's tombstone in `liveness`
-            # (joined by url while it carries no ad_id); no planner reads that ledger yet, so nothing here
-            # stops a later plan from listing the ad again.
+            # Nothing to parse: the ad page is gone. The gone event is the ad's tombstone in `liveness`, which
+            # every planner reads (plan.eligible, plan.admit), so a later plan does not list the ad again.
             return
         if reason:
             stopped.append(_challenge(job, ctx.request.url, reason, res, n_hops))
@@ -949,6 +1009,7 @@ async def _crawl(
         except Exception as e:  # noqa: BLE001 - a parser or contract error: what came back cannot be used
             if kind == "ad":
                 parse_failed(ctx.request, e)
+                settle(ctx.request, "failed")
                 return  # the run goes on: one ad that cannot be parsed is no reason to stop the others
             list_status("failed")
             what = (
@@ -957,6 +1018,7 @@ async def _crawl(
             halt(Stop(EXIT_PARSE, f"STOPPED: list page {ctx.request.url} {what} ({type(e).__name__}: {e})"),
                  "list page unusable")  # fmt: skip
             return
+        settle(ctx.request, "ok")
         if new:  # dynamic enqueue (e.g. the sample planned from page 1's page count)
             await queue.add_requests(_requests(new))
 
@@ -971,7 +1033,7 @@ async def _crawl(
 
     @crawler.failed_request_handler
     async def failed(ctx, error: Exception) -> None:
-        breaker(ctx, error)
+        circuit(ctx, error)
         responded.discard(ctx.request.unique_key)
         attempts.errored(ctx.request.unique_key)
         log_page(ctx.request, None)
@@ -1021,6 +1083,8 @@ def _preflight(job: Run, polite: Politeness, name: str, counts: dict, card_info:
     the site cooldown, the run's one proxy, the egress preflight (a refusal stops, nothing sent to the
     site), the run card as line 1 of the log, status running."""
     polite.checked()
+    if stop := latch_stop(job.doc["source"]):  # the CLI refuses before its gate; this is the backstop
+        raise stop
     if until := cooldown_until(job.doc["source"]):
         raise Stop(
             EXIT_COOLDOWN,
@@ -1062,6 +1126,7 @@ def _run(
     backend_opts: dict | None = None,
     card_info: dict | None = None,
     postcheck: Callable[[Run, Stop | None], Stop | None] | None = None,
+    pol: policy.SyncPolicy | None = None,
 ) -> int:
     """The run itself; `run` wraps it in the live log."""
     name = (backend_opts or {}).get("backend") or variants.get(job.doc["variant"]).backend
@@ -1073,7 +1138,9 @@ def _run(
     stop, ended = None, False
     try:
         stop = asyncio.run(
-            _crawl(job, requests, source, handle, polite, backend_opts or {}, counts, _ceiling(card_info))
+            _crawl(
+                job, requests, source, handle, polite, backend_opts or {}, counts, _ceiling(card_info), pol
+            )
         )
         ended = True
     finally:
@@ -1163,6 +1230,7 @@ def run(
     backend_opts: dict | None = None,
     card_info: dict | None = None,
     postcheck: Callable[[Run, Stop | None], Stop | None] | None = None,
+    pol: policy.SyncPolicy | None = None,
 ) -> int:
     """Run (or resume, when `requests` is None) `job`. Returns 0, or raises Stop (recorded as run.v1
     `stop`). The whole attempt is logged live to runs/<run_id>.log.jsonl (ADR-0007), referenced from
@@ -1171,7 +1239,7 @@ def run(
         job.doc["log_ref"] = rel
         # the first line of the log is the run card (written once the egress is known)
         try:
-            code = _run(job, source, handle, polite, requests, backend_opts, card_info, postcheck)
+            code = _run(job, source, handle, polite, requests, backend_opts, card_info, postcheck, pol)
         except Stop as s:
             runlog.LOG.warning(
                 "stopped (exit %s): %s",
@@ -1181,7 +1249,7 @@ def run(
             )
             job.doc["stop"] = {"code": s.code, "reason": str(s) or f"exit {s.code}"}
             job.save()
-            incidents.open_incident(s.code, str(s), job.doc["run_id"], job.doc["command"])
+            incidents.open_incident(s.code, str(s), job.doc["run_id"], job.doc["command"], kind=s.kind)
             raise
         runlog.LOG.info("completed", extra={"event": "stop", "code": 0, "counts": job.doc.get("requests")})
         return code

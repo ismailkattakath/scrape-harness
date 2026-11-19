@@ -13,7 +13,7 @@ States:
                the ad's first one. A second tombstone is final until an OK fetch or an operator void, so a
                site that keeps showing a dead card costs at most one extra GET per ad.
   quarantined  the ad's LATEST gone event belongs to a run whose gone events a correction quarantined (a breaker
-               trip): doubtful, so it makes no tombstone and clears none, and the ad is not eligible either.
+               trip, which quarantines only the run's weak gones: `corrections.gone_effect`): doubtful, so it makes no tombstone and clears none, and the ad is not eligible either.
                An OK fetch clears it; a list sighting does not (the operator resolves the run).
   held         a parse_failed event after the ad's latest live sighting before it, with no listing written
                since that sighting (a later fetch, or a `reparse` of the saved snapshot, which carries the
@@ -248,7 +248,7 @@ def build(
         if e["kind"] == "parse_failed":
             acc(k).failed.append((_t(e["at"]), e))
             continue
-        mode = (fixed.get(e.get("run_id")) or {}).get("gone")
+        mode = corrections.gone_effect(fixed.get(e.get("run_id")), e.get("reason"))
         if mode != "void":
             acc(k).gone.append((_t(e["at"]), e, mode == "quarantine"))
     return Ledger({k: _fold(k[0], k[1], a, rules) for k, a in accs.items()})

@@ -314,7 +314,7 @@
     },
     "supersedes": {
       "type": "string",
-      "description": "The stopped run whose pending requests this run took over (fetch-ads --supersede); that run gets a `superseded` event naming this one."
+      "description": "The stopped run whose pending requests this run took over (fetch-ads --supersede, or a crawl resume of a fetch-ads run), each admitted through the fresh-sighting gate again; that run gets a `superseded` event naming this one."
     },
     "supersede_scope": {
       "type": "string",
@@ -542,7 +542,7 @@
             "failure",
             null
           ],
-          "description": "gone: absence/redirect gones; failure: parse_failed + failed_request."
+          "description": "gone: gones that rest on absence or a redirect (never expired_notice or http_410); failure: parse_failed."
         },
         "g": {
           "type": "integer",

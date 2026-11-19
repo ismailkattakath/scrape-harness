@@ -792,3 +792,22 @@ def test_a_second_refresh_of_a_locked_run_id_refuses_and_changes_nothing(
 def test_the_lock_keeps_the_run_id_format_check():
     with pytest.raises(approvals.NotApproved, match="not a refresh run id"), refresh.locked("../../x"):
         pass
+
+
+def test_a_latched_site_refuses_the_refresh_before_any_plan_or_spend(chain, data_dir, capsys):
+    """A tripped gone-storm breaker latches the site: the refresh refuses (exit 14) before it prints a plan to
+    approve, and an approval that already exists is neither claimed nor spent."""
+    from scrape_harness import crawl
+
+    approved(capsys)
+    job = crawl.Run.new("fetch-ads", "desktop", "example.invalid")
+    job.doc["breaker"] = {"tripped": True, "kind": "gone", "g": 5, "n": 5, "p0": 0.1, "alpha": 0.0001}
+    job.save()
+    capsys.readouterr()
+    assert main(["refresh", "--approve-network"]) == crawl.EXIT_PARSE
+    out, err = capsys.readouterr()
+    assert out == "" and "latched" in err
+    assert chain == [] and refresh.states() == []  # nothing ran, nothing claimed
+    assert main(["breaker", "clear", "--site", "example.invalid", "--resolve", "keep", "--note", "synthetic",
+                 "--approve-operator"]) == 0  # fmt: skip
+    assert main(["refresh", "--approve-network"]) == 0  # the same approval, unspent, now runs

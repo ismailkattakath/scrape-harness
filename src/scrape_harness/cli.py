@@ -22,6 +22,7 @@ from pathlib import Path
 
 from . import (
     approvals,
+    breaker,
     contracts,
     corrections,
     crawl,
@@ -214,9 +215,10 @@ def _execute(
     requests: list[dict] | None,
     card: dict | None = None,
     postcheck=None,
+    pol: policy.SyncPolicy | None = None,
 ) -> int:
     try:
-        crawl.run(job, source, handle, _polite(args), requests, _opts(args), card, postcheck)
+        crawl.run(job, source, handle, _polite(args), requests, _opts(args), card, postcheck, pol)
     except crawl.Stop as s:
         print(str(s), file=sys.stderr)
         _refund_if_unsent(job, s)
@@ -360,7 +362,10 @@ def gate(args: argparse.Namespace, plan_doc: dict, variant_names: list[str]) -> 
     Networked run: consume a matching operator approval or refuse (exit 10). Offline backends: no gate.
     --refresh-run RUN_ID (a `<cli> refresh` step): consume that refresh's BOUNDED approval for exactly what
     this step sends (approvals.consume_bounded) instead of a single-use plan approval; a step outside the
-    bounds stops (exit 3). The same checks precede it."""
+    bounds stops (exit 3). The same checks precede it. FIRST: a site latched by the gone-storm breaker refuses
+    (exit 14) every plan and run, so no approval is asked for or spent."""
+    if stop := crawl.latch_stop(plan_doc["site"]):
+        raise stop
     if args.plan:
         h = approvals.save_plan(plan_doc)
         _card(
@@ -482,8 +487,7 @@ def _iso(dt: datetime) -> str:
 
 
 def _run_docs() -> list[dict]:
-    d = store.data_dir() / "runs"  # read only: a dry run creates nothing
-    return [store.read_json(p, "run.v1") for p in sorted(d.glob("*.json"))] if d.is_dir() else []
+    return crawl.run_docs()  # read only: a dry run creates nothing
 
 
 def _records() -> tuple[list, list, list, list]:
@@ -664,6 +668,16 @@ def ads_outcome(planned: set[tuple]):
     return check
 
 
+def _postcondition(planned: list[dict], recs: tuple, as_of: str, pol: policy.SyncPolicy) -> None:
+    """plan.assert_admissible over the RAW records, before the gate: a plan naming an ad the records say must
+    not get a view is a selector bug, refused (exit 14) before any approval is spent or any GET is sent."""
+    observations, listings, events, _ = recs
+    bad = plan.assert_admissible(planned, observations, listings, events, as_of, pol)
+    if bad:
+        raise crawl.Stop(crawl.EXIT_PARSE, f"refusing: the plan names {len(bad)} ad(s) that must not get a view "
+                         f"(postcondition): {'; '.join(bad[:5])}{' ...' if len(bad) > 5 else ''}")  # fmt: skip
+
+
 def _write_sample_manifest(job: crawl.Run, source, design: dict, picks: list[dict]) -> str:
     rel = f"derived/samples/{store.safe_name(job.doc['run_id'])}.jsonl"
     rows = [
@@ -711,14 +725,18 @@ def _dry_run_gates(args: argparse.Namespace, todo: list[tuple[str, dict]]) -> di
     return out
 
 
-def _superseding(args: argparse.Namespace):
-    """fetch-ads --supersede RUN: exactly that stopped run's PENDING ad requests (or, with --failed, its
-    FAILED ones), as a NEW run (its own plan, approval and proxy). The old run gets an append-only
-    `superseded` event naming the new one. Each scope is taken over ONCE: the old run's own queue never
-    changes, so a second supersede of the same scope would GET the same ads again."""
+def _superseding(args: argparse.Namespace, statuses: tuple[str, ...] = ("stopped", "aborted")):
+    """fetch-ads --supersede RUN: that stopped run's PENDING ad requests (or, with --failed, its FAILED ones),
+    as a NEW run (its own plan, approval and proxy), each admitted through the gate again (plan.admit, in
+    _fetch_superseding). The old run gets an append-only `superseded` event naming the new one. Each scope is
+    taken over ONCE: the old run's own queue never changes, so a second supersede of the same scope would GET
+    the same ads again. A run whose breaker tripped is refused (exit 14): the operator clears it first."""
     old = crawl.Run.load(args.supersede)
-    if old.doc["command"] != "fetch-ads" or crawl.status_of(old.doc) not in ("stopped", "aborted"):
-        raise SystemExit(f"--supersede needs a stopped or aborted fetch-ads run; {args.supersede} is "
+    if (old.doc.get("breaker") or {}).get("tripped"):
+        raise crawl.Stop(crawl.EXIT_PARSE, f"refusing: run {args.supersede} tripped the gone-storm breaker; its "
+                         "queue is not taken over (plan a new fetch-ads once the operator has cleared it)")  # fmt: skip
+    if old.doc["command"] != "fetch-ads" or crawl.status_of(old.doc) not in statuses:
+        raise SystemExit(f"--supersede needs a {' or '.join(statuses)} fetch-ads run; {args.supersede} is "
                          f"{old.doc['command']} / {crawl.status_of(old.doc)}")  # fmt: skip
     scope = "failed" if getattr(args, "failed", False) else "pending"
     for e in store.read("events"):
@@ -753,6 +771,9 @@ def cmd_fetch_ads(args: argparse.Namespace) -> int:
     sel = sel or _select(args, pol, recs, _iso(_now()))
     todo, design, picks = sel.todo, sel.design, sel.picks
     if args.dry_run:
+        for site in sorted({o["site"] for _, o in todo} | {d["source"] for d in recs[3]}):
+            if stop := crawl.latch_stop(site):
+                print(f"breaker latch: {stop}", file=sys.stderr)  # a dry run sends nothing: it still looks
         _card(
             "fetch-ads",
             f"DRY RUN: list the {len(todo)} ads a run would fetch; nothing is sent",
@@ -792,6 +813,10 @@ def cmd_fetch_ads(args: argparse.Namespace) -> int:
     source = load("sources", sites.pop())
     variant = _variant(args, source, "ad")
     _polite(args)
+    if stop := crawl.latch_stop(source.site):  # before the postcondition: a latched site is the louder fact
+        raise stop
+    _postcondition([{"site": o["site"], "ad_id": o["ad_id"], "url": o["ad_url"]} for _, o in todo], recs,
+                   sel.ads["as_of"], pol)  # fmt: skip
     approval = gate(args, _fetch_plan_doc(args, sel, source, variant), [variant])
     if approval and "planned" in approval:
         return 0
@@ -830,50 +855,85 @@ def cmd_fetch_ads(args: argparse.Namespace) -> int:
         "selection": selection_words(sel.ads),
     }
     planned = {(o["site"], o["ad_id"]) for _, o in todo}
-    return _execute(args, job, source, ad_handler(source), reqs, card, ads_outcome(planned))
+    return _execute(args, job, source, ad_handler(source), reqs, card, ads_outcome(planned), pol)
 
 
-def _fetch_superseding(args: argparse.Namespace) -> int:
-    old, reqs, scope = _superseding(args)
+def _admitted(args, old, reqs, scope, recs, pol, source, variant, as_of: str):
+    """(plan doc, kept requests, dropped counts, as_of): the old queue admitted at `as_of`, as a plan."""
+    cands, _, as_of = fetch_pool(recs, pol, as_of)
+    kept, dropped = plan.admit(reqs, cands, old.doc["created_at"])
+    doc = run_plan(
+        args,
+        "fetch-ads",
+        source,
+        [variant],
+        supersedes=old.doc["run_id"],
+        ads=[[r["meta"]["reason"], r["url"]] for r in kept],
+        as_of=as_of,  # signed: the run admits at THIS time again, so it reproduces the plan
+        policy_digest=pol.digest(),
+        **({"supersede_scope": scope} if scope != "pending" else {}),
+    )
+    return doc, kept, dropped, as_of
+
+
+def _fetch_superseding(args: argparse.Namespace, statuses: tuple[str, ...] = ("stopped", "aborted")) -> int:
+    old, reqs, scope = _superseding(args, statuses)
     source = load("sources", old.doc["source"])
     variant = _variant(args, source, "ad")
-    if args.dry_run:
-        _card("fetch-ads", f"DRY RUN: the {len(reqs)} {scope} ads of {old.doc['run_id']}; nothing is sent",
-              mode="dry-run", planned={"ad": len(reqs), "robots": 1}, per_minute=args.max_tasks_per_minute)  # fmt: skip
-        for r in reqs:
-            print(json.dumps({"reason": r["meta"].get("reason"), "url": r["url"]}))
-        return 0
-    _polite(args)
-    approval = gate(
-        args,
-        run_plan(
-            args,
-            "fetch-ads",
-            source,
-            [variant],
-            supersedes=old.doc["run_id"],
-            ads=[[r["meta"].get("reason"), r["url"]] for r in reqs],
-            **({"supersede_scope": scope} if scope != "pending" else {}),  # pending plans hash as before
-        ),  # fmt: skip
-        [variant],
+    pol = policy.from_args(args)
+    recs = _records()
+    dry = getattr(args, "dry_run", False)
+    found = None
+    if not args.plan and not dry and _networked(args, [variant]):
+        # the as_of its approved plan signed (newest approval first), like fetch-ads' own selection
+        for d in approvals.approved_plans("fetch-ads"):
+            if (d.get("supersedes") != old.doc["run_id"] or not d.get("as_of")
+                    or d.get("policy_digest") != pol.digest() or plan.ts(d["as_of"]) > _now()):  # fmt: skip
+                continue
+            got = _admitted(args, old, reqs, scope, recs, pol, source, variant, d["as_of"])
+            if approvals.has_live(approvals.canonical(got[0])[1]):
+                found = got
+                break
+    doc, kept, dropped, as_of = found or _admitted(
+        args, old, reqs, scope, recs, pol, source, variant, _iso(_now())
     )
+    if dry:
+        _card("fetch-ads", f"DRY RUN: the {len(kept)} admitted {scope} ads of {old.doc['run_id']} (of "
+              f"{len(reqs)} queued); nothing is sent", mode="dry-run", planned={"ad": len(kept), "robots": 1}
+              if kept else {}, per_minute=args.max_tasks_per_minute)  # fmt: skip
+        for r in kept:
+            print(json.dumps({"reason": r["meta"]["reason"], "url": r["url"]}))
+        print(json.dumps({"summary": True, "queued": len(reqs), "admitted": len(kept), "dropped": dropped}))
+        return 0
+    if not kept:
+        print(json.dumps({"planned": 0, "queued": len(reqs), "dropped": dropped}))
+        return 0
+    if stop := crawl.latch_stop(source.site):
+        raise stop
+    _postcondition([{"site": r["meta"]["site"], "ad_id": r["meta"]["ad_id"], "url": r["url"]} for r in kept],
+                   recs, as_of, pol)  # fmt: skip
+    _polite(args)
+    approval = gate(args, doc, [variant])
     if approval and "planned" in approval:
         return 0
     _check_backend(args, variant, "fetch-ads")
     job = crawl.Run.new("fetch-ads", variant, source.site)
     job.doc["supersedes"] = old.doc["run_id"]
     job.doc["supersede_scope"] = scope
+    job.doc["ads"] = {"as_of": as_of, "policy_digest": pol.digest(), "eligible": len(kept)}
     if approval:
         job.doc["approval_ref"] = approval
     job.save()
     crawl.event(old.doc["run_id"], "superseded", None, job.doc["run_id"], site=old.doc["source"])
     card = {
         "command": "fetch-ads",
-        "purpose": f"fetch the {len(reqs)} {scope} ads of stopped run {old.doc['run_id']} (superseding it)",
-        "planned": {"ad": len(reqs), "robots": 1},
-        "ceiling": len(reqs),
+        "purpose": f"fetch the {len(kept)} admitted {scope} ads of stopped run {old.doc['run_id']} (superseding "
+        f"it; {len(reqs) - len(kept)} dropped)",
+        "planned": {"ad": len(kept), "robots": 1},
+        "ceiling": len(kept),
     }
-    return _execute(args, job, source, ad_handler(source), reqs, card)
+    planned = {(r["meta"]["site"], r["meta"]["ad_id"]) for r in kept}
+    return _execute(args, job, source, ad_handler(source), kept, card, ads_outcome(planned), pol)
 
 
 def cmd_crawl_correct(args: argparse.Namespace) -> int:
@@ -891,6 +951,8 @@ def cmd_crawl_resume(args: argparse.Namespace) -> int:
         print(f"refusing: run {job.doc['run_id']} stopped terminally (exit {crawl.EXIT_PARSE}: "
               f"{stop.get('reason') or lst.get('status')}); plan a new run instead", file=sys.stderr)  # fmt: skip
         return crawl.EXIT_PARSE
+    if job.doc["command"] == "fetch-ads":
+        return _resume_fetch_ads(args, job)
     source = load("sources", job.doc["source"])
     # the plan signs the proxy the run will actually use: its own (a resume keeps it), not a new choice
     args.kept_proxy = (job.doc.get("proxy") or {}).get("url")
@@ -935,6 +997,32 @@ def cmd_crawl_resume(args: argparse.Namespace) -> int:
         },
         postcheck=list_outcome if job.doc["command"] == "crawl-lists" else None,
     )
+
+
+def _resume_fetch_ads(args: argparse.Namespace, job: crawl.Run) -> int:
+    """A fetch-ads run is never resumed in place: its persisted queue was planned against older records. It is
+    rebuilt as a NEW run of its pending ads, each admitted through the gate again (the supersede path), and
+    refused (exit 14, before any gate) when the run is aborted, already superseded, or older than the policy
+    window W (its sightings are no longer fresh)."""
+    pol = policy.from_args(args)
+    rid, now = job.doc["run_id"], _now()
+    succ = [e["reason"] for e in store.read("events") if e.get("run_id") == rid and e["kind"] == "superseded"]
+    why = (
+        "it tripped the gone-storm breaker" if (job.doc.get("breaker") or {}).get("tripped")
+        else "it was aborted" if crawl.status_of(job.doc) == "aborted"
+        else f"it was superseded by {succ[-1]}" if succ
+        else f"it is older than the {pol.window_h} h window" if plan.ts(job.doc["created_at"]) < now - pol.window
+        else None
+    )  # fmt: skip
+    if why:
+        print(
+            f"refusing: fetch-ads run {rid} is not resumed: {why}; plan a new fetch-ads instead",
+            file=sys.stderr,
+        )
+        return crawl.EXIT_PARSE
+    args.supersede, args.failed = rid, False
+    args.dry_run = getattr(args, "dry_run", False)
+    return _fetch_superseding(args, statuses=("stopped", "running"))
 
 
 def cmd_probe_robots(args: argparse.Namespace) -> int:
@@ -1197,6 +1285,42 @@ def cmd_cooldown(args: argparse.Namespace) -> int:
     print(
         json.dumps({"site": args.site, "cleared": e["clears"], "cleared_at": e["at"], "reason": e["reason"]})
     )
+    return 0
+
+
+def cmd_breaker(args: argparse.Namespace) -> int:
+    """`breaker status [--site S]` (JSONL), or the operator's `breaker clear --site S --resolve keep|void --note
+    ... --approve-operator`: for each run latching S, one `gone` correction (keep: its quarantined gones are
+    real deaths, tombstones again; void: its weak gones were wrong, dropped; a positive marker stands either
+    way) and one `breaker` correction {clear: true} that lifts the latch. Appended, never rewritten."""
+    _card("breaker", f"breaker {args.action}" + (f" for {args.site}" if args.site else ""))
+    runs, events = crawl.run_docs(), list(store.read("events"))
+    if args.action == "status":
+        tripped = {d["source"] for d in runs if (d.get("breaker") or {}).get("tripped")}
+        for site in [args.site] if args.site else sorted(tripped):
+            print(json.dumps({"site": site, "latched_by": breaker.latched(site, runs, events)}))
+        return 0
+    if not args.approve_operator:
+        print("refusing: clearing a breaker latch is the operator's decision. Re-run with --approve-operator.",
+              file=sys.stderr)  # fmt: skip
+        return EXIT_APPROVAL
+    if not args.site or not args.resolve or not (args.note or "").strip():
+        print("breaker clear needs --site, --resolve keep|void and a non-empty --note (it is recorded).",
+              file=sys.stderr)  # fmt: skip
+        return EXIT_CONFIG
+    cleared = []
+    for rid in breaker.latched(args.site, runs, events):
+        ev = [f"DATA:runs/{store.safe_name(rid)}.json", "DATA:events.jsonl"]
+        gone = {"quarantine": False} if args.resolve == "keep" else {"void": True, "scope": "weak"}
+        crawl.append_correction(run_id=rid, field="gone", recorded={"quarantine": True, "scope": "weak"},
+                                reconciled=gone | {"by": "breaker clear"}, note=args.note.strip(), evidence=ev,
+                                site=args.site)  # fmt: skip
+        crawl.append_correction(run_id=rid, field="breaker", recorded={"tripped": True},
+                                reconciled={"clear": True, "resolve": args.resolve,
+                                            **({"plugin_version": args.plugin_version} if args.plugin_version else {})},
+                                note=args.note.strip(), evidence=ev, site=args.site)  # fmt: skip
+        cleared.append(rid)
+    print(json.dumps({"site": args.site, "resolve": args.resolve, "cleared": cleared}))
     return 0
 
 
@@ -1581,6 +1705,20 @@ def parser() -> argparse.ArgumentParser:
     co.add_argument("--approve-operator", action="store_true", help="clear: the OPERATOR decided this")
     co.set_defaults(fn=cmd_cooldown)
 
+    bk = sub.add_parser(
+        "breaker", help="the gone-storm breaker's site latch: status, or an audited operator clear (appends)"
+    )
+    bk.add_argument("action", choices=["status", "clear"])
+    bk.add_argument("--site", help="the latched site")
+    bk.add_argument("--resolve", choices=["keep", "void"],
+                    help="clear: keep (the quarantined gones were real deaths) or void (they were wrong)")  # fmt: skip
+    bk.add_argument("--note", help="clear: what the evidence showed (recorded)")
+    bk.add_argument(
+        "--plugin-version", help="clear: the source plug-in version that fixes it, if any (recorded)"
+    )
+    bk.add_argument("--approve-operator", action="store_true", help="clear: the OPERATOR decided this")
+    bk.set_defaults(fn=cmd_breaker)
+
     pr = sub.add_parser("probe", help="one-request checks of the site")
     prs = pr.add_subparsers(dest="action", required=True)
     po = prs.add_parser(
@@ -1691,7 +1829,7 @@ def main(argv: list[str] | None = None) -> int:
         return approvals.EXIT_UNAPPROVED
     except crawl.Stop as s:
         print(str(s), file=sys.stderr)
-        incidents.open_incident(s.code, str(s), None, getattr(args, "cmd", None))
+        incidents.open_incident(s.code, str(s), None, getattr(args, "cmd", None), kind=s.kind)
         return s.code
     except contracts.ContractError as e:
         print(str(e), file=sys.stderr)

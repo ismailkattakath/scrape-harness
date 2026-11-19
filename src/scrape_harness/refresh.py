@@ -503,6 +503,12 @@ def _cmd(args: argparse.Namespace, stack: contextlib.ExitStack) -> int:
         _print_summary(st)
         return 0
     bounds, networked = build_bounds(args.ttl or DEFAULT_TTL, args.max_ad_requests)
+    from . import crawl
+
+    if stop := crawl.latch_stop(bounds["site"]):  # before a plan is printed or an approval claimed or spent
+        print(str(stop), file=sys.stderr)
+        if not args.dry_run:
+            return stop.code
     proxies = configured_proxies() if networked else ()
     core = approvals.bounds_core(bounds, proxies)
     if st:

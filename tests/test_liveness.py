@@ -315,7 +315,7 @@ def test_corrections_apply_status_and_gone():
           correction("R1", "status", {"status": "completed"})]  # fmt: skip
     runs = [run_doc("R1", "stopped"), run_doc("R2"), run_doc("R3"), run_doc("R4", "aborted")]
     fixed = corrections.apply(runs, ev)
-    assert fixed["R1"] == {"status": "completed", "list_status": None, "gone": None}
+    assert fixed["R1"] == {"status": "completed", "list_status": None, "gone": None, "gone_scope": None}
     assert fixed["R2"]["gone"] == "void" and fixed["R3"]["gone"] == "quarantine"
     assert fixed["R4"]["status"] == "aborted"
     assert corrections.latest(ev, "status")["R1"] == {"status": "completed"}
@@ -324,9 +324,19 @@ def test_corrections_apply_status_and_gone():
 def test_corrections_for_unknown_runs_still_apply():
     """A run doc may be missing (moved, legacy): its gone correction still holds."""
     fixed = corrections.apply([], [correction("GONE", "gone", {"void": True})])
-    assert fixed["GONE"] == {"status": None, "list_status": None, "gone": "void"}
+    assert fixed["GONE"] == {"status": None, "list_status": None, "gone": "void", "gone_scope": None}
 
 
 @pytest.mark.parametrize("bad", [{"void": True, "quarantine": True}])
 def test_void_wins_over_quarantine_in_one_correction(bad):
     assert corrections.apply([], [correction("R", "gone", bad)])["R"]["gone"] == "void"
+
+
+@pytest.mark.parametrize(("reason", "effect"), [("served_list", "quarantine"), ("http_404", "quarantine"),
+                                                ("expired_notice", None), ("http_410", None)])  # fmt: skip
+def test_a_weak_scoped_correction_leaves_positive_markers_standing(reason, effect):
+    """A breaker trip quarantines only the run's WEAK gones: the site's own expiry notice stays a tombstone."""
+    fixed = corrections.apply([], [correction("R", "gone", {"quarantine": True, "scope": "weak"})])
+    assert corrections.gone_effect(fixed["R"], reason) == effect
+    assert corrections.gone_effect(corrections.apply([], [correction("R", "gone", {"void": True})])["R"],
+                                   reason) == "void"  # unscoped: every gone of the run  # fmt: skip

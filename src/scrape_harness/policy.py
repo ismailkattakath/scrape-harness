@@ -12,7 +12,8 @@ Fields (judgement values; changing one is an operator decision):
                  unused new-lane quota never flows into revisits (unused revisit quota does flow to new). 0.2.
   stale_after_d  a stored copy older than this, of an ad still listed, is due a revisit (stale_7d). 7.
   readmit_h      a list sighting re-admits a tombstoned ad only this long after the gone (liveness). 24.
-  breaker_*      the gone-storm and ad-failure breaker (p0, alpha, floor). Signed now; no breaker reads them yet.
+  breaker_*      the gone-storm and ad-failure breaker (p0, alpha, floor): breaker.py's trip rule, which every
+                 fetch-ads run (and supersede) is passed.
   lanes          the version of select_ads' lane and order rules, so a rule change is a policy change."""
 
 from __future__ import annotations

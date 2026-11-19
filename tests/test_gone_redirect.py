@@ -301,9 +301,22 @@ def test_the_resume_plan_counts_what_is_still_pending(data_dir):
 
 
 # ── fetch-ads --supersede: a NEW run of exactly a stopped run's pending ads ────────────────────────────
+def sighted_now(*urls):
+    """Fresh list sightings of these ads: a superseded queue is admitted through the gate again (plan.admit),
+    so only an ad with a fresh good sighting, alive and due, is taken over."""
+    from datetime import UTC, datetime
+
+    from test_fresh_gate import card_obs
+
+    at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    store.append("observations", [card_obs(i, at) | {"ad_id": u.rsplit("-", 1)[1], "ad_url": u}
+                                  for i, u in enumerate(urls)])  # fmt: skip
+
+
 def test_supersede_takes_exactly_the_pending_ads_and_closes_the_old_run(data_dir, tmp_path, capsys):
     base = f"{ORIGIN}/listings/widgets/sample-region"  # the example's real ad URLs (its parser reads the id)
     a, b, c = f"{base}/blue-widget-1000001", f"{base}/red-widget-1000002", f"{base}/green-widget-1000003"
+    sighted_now(a, b, c)
     files = [("wall.html", WALL)]
     opts = fixtures(tmp_path, {a: "ad-1000001.html", b: "wall.html", c: "ad-1000003.html"}, files)
     old = crawl.Run.new("fetch-ads", "desktop", "example.invalid")
@@ -335,6 +348,7 @@ def test_supersede_takes_exactly_the_pending_ads_and_closes_the_old_run(data_dir
     assert (
         sup["run_id"] == old.doc["run_id"] and sup["reason"] == doc["run_id"]
     )  # the old run names its successor
+    assert {r["fetch_reason"] for r in store.read("listings")} == {"recruit"}  # the queue's reason survives
     with pytest.raises(SystemExit, match="stopped or aborted"):
         main(["fetch-ads", "--supersede", doc["run_id"], *fix])  # a completed run cannot be superseded
     # the old run stays "stopped" and its own queue still lists b and c as pending: a second supersede
@@ -347,6 +361,7 @@ def test_supersede_takes_exactly_the_pending_ads_and_closes_the_old_run(data_dir
 def test_supersede_failed_takes_exactly_the_failed_ads_once(data_dir, tmp_path, capsys):
     base = f"{ORIGIN}/listings/widgets/sample-region"
     a, b = f"{base}/blue-widget-1000001", f"{base}/red-widget-1000002"
+    sighted_now(a, b)
     bad = [("bad.html", "<main>x</main>")]
     opts = fixtures(tmp_path, {a: {"file": "bad.html", "status": 502}, b: "ad-1000002.html"}, bad)
     old = crawl.Run.new("fetch-ads", "desktop", "example.invalid")

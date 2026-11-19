@@ -21,6 +21,7 @@ CLI, the safety checks and the tooling from this flake.
 | **Signed approvals** | A networked command refuses (exit 10) until the operator signs that exact plan (`<cli> approve <plan_hash>`). Approvals are single use, expire, and sit in a hash-chained ledger that `<cli> approvals verify` audits. |
 | **Careful crawling** | One request at a time, robots.txt obeyed, a politeness ceiling, an egress preflight before any request, tracker blocking over pinned filter lists, and a dedicated Nix-pinned Chromium profile. |
 | **Stop on challenge** | A challenge page stops the run (exit 5). A second one inside an hour writes a site cooldown (exit 6). Nothing retries around it. |
+| **Gone-storm breaker** | Ad pages that look gone by absence or a redirect (or fail to parse) far more often than chance trip a one-sided binomial rule: the run stops (exit 14), its doubtful gones are quarantined, and the site stays latched until `<cli> breaker clear --approve-operator`. A queue is never re-sent unfiltered: `--supersede` and `crawl resume` admit it through the same gate. |
 | **Run cards** | Every run prints a card: stage N/M, inputs, outputs, scale and ETA, and where its live log is. |
 | **Append-only store** | Typed JSONL under a data root **outside any git repository**; the CLI refuses a data path inside one. |
 | **Gates** | `leak-gate` and `public-gate` (forbidden literals and gitleaks), and `ship`, the one push path. |

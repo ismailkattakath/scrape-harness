@@ -43,6 +43,7 @@ def write(path, content="x", **kw):
         "examplesite crawl-lists --driver fixture --subcategory x",
         "nix flake check",
         "examplesite ab --driver fixture --subcategory x",
+        "examplesite breaker status",
     ],
 )
 def test_bash_allows_offline(cmd):
@@ -88,6 +89,7 @@ def test_bash_approved_network_run_still_asks_the_human(cmd):
     [
         "examplesite cooldown clear --site example.invalid --reason x --approve-operator",
         "examplesite cooldown clear --site example.invalid --reason x",
+        "examplesite breaker clear --site example.invalid --resolve keep --note x --approve-operator",
     ],
 )
 def test_bash_cooldown_clear_asks(cmd):

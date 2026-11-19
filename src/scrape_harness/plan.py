@@ -146,6 +146,119 @@ def select_ads(cands: list[dict], budget: int, policy) -> tuple[list[tuple[str, 
     return picks, {"new": len(new), "revisit": len(rev)}
 
 
+# ── queued requests and the postcondition (ADR-0017 §B.5, §B.6) ──────────────────────────────────────
+
+
+def admit(reqs: list[dict], cands: list[dict], since: str) -> tuple[list[dict], dict[str, int]]:
+    """(kept, dropped): the queued ad requests (a stopped run's queue) that the gate admits NOW.
+
+    cands is `eligible`'s output at the new plan's as_of (alive, freshly sighted, due), so a queue never gets a
+    rule of its own. A request joins its ad by meta ad_id and site, else (a queue written before meta carried
+    them) by its url, which must name exactly one candidate. Dropped, counted once by the first that applies:
+    ineligible (tombstoned, quarantined, held, dormant, not due, unknown), fetched_since (a listing fetched at or
+    after `since`, the old run's created_at: that run or a later one already got it), duplicate. A kept request
+    carries its ad_id and site, and the candidate's CURRENT fetch reason, except that an ad still never fetched
+    keeps the queue's own reason (e.g. `recruit`): a listing's fetch_reason is append-only, so it says why the
+    view was planned."""
+    by_key = {_ad_key(c["obs"]): c for c in cands}
+    by_url: dict[str, list[dict]] = {}
+    for c in cands:
+        by_url.setdefault(c["obs"]["ad_url"], []).append(c)
+    kept, seen = [], set()
+    dropped = dict.fromkeys(("ineligible", "fetched_since", "duplicate"), 0)
+    for r in reqs:
+        m = r.get("meta") or {}
+        if m.get("ad_id") and m.get("site"):
+            c = by_key.get((m["site"], m["ad_id"]))
+        else:
+            hits = by_url.get(r["url"], [])
+            c = hits[0] if len(hits) == 1 else None
+        if c is None:
+            dropped["ineligible"] += 1
+            continue
+        key = _ad_key(c["obs"])
+        if c["fetched_at"] and c["fetched_at"] >= since:
+            dropped["fetched_since"] += 1
+            continue
+        if key in seen:
+            dropped["duplicate"] += 1
+            continue
+        seen.add(key)
+        reason = m["reason"] if c["reason"] == "new" and m.get("reason") else c["reason"]
+        meta = {**m, "reason": reason, "ad_id": key[1], "site": key[0]}
+        kept.append({**r, "meta": meta})
+    return kept, dropped
+
+
+def assert_admissible(planned: list[dict], observations, listings, events, as_of: str, policy) -> list[str]:
+    """The violations (empty: admissible) of a plan of ads {site, ad_id, url}, read from the RAW records.
+
+    Deliberately NOT built on `eligible`, `select_ads` or `liveness`: it is the independent check that a selector
+    bug cannot pass. Every rule is a NECESSARY condition of the gate, so an ad the gate admits always passes:
+      - no ad twice;
+      - its latest sighting (any crawl) is inside the policy window of as_of;
+      - no listing fetched at or after its latest sighting (the gate plans a fetched ad only on a newer card);
+      - no gone event (by ad_id, or by its url) at or after its latest OK fetch, unless a sighting re-admits it:
+        one at least readmit_h after the earliest such gone and after the latest one. An operator `void` of the
+        gone's run (corrections.gone_effect) drops it."""
+    from . import corrections
+
+    observations, listings, events = list(observations), list(listings), list(events)
+    lo = _t(as_of) - policy.window
+    readmit = timedelta(hours=policy.readmit_h)
+    fixed = corrections.apply([], events)
+    seen: dict[tuple, list[datetime]] = {}
+    for o in observations:
+        seen.setdefault((o["site"], o["ad_id"]), []).append(_t(o["seen_at"]))
+    fetched: dict[tuple, list[datetime]] = {}
+    ok: dict[tuple, list[datetime]] = {}
+    urls: dict[tuple, set] = {}
+    for r in listings:
+        src = r.get("source") or {}
+        k = (src.get("site", r.get("site")), r["ad_id"])
+        fetched.setdefault(k, []).append(_t(r["fetched_at"]))
+        if r.get("fetch_reason") != "reparse":
+            ok.setdefault(k, []).append(_t(r["fetched_at"]))
+        if src.get("url"):
+            urls.setdefault(k, set()).add(src["url"])
+    gones = [
+        e
+        for e in events
+        if e.get("kind") == "gone"
+        and corrections.gone_effect(fixed.get(e.get("run_id")), e.get("reason")) != "void"
+    ]
+    out, done = [], set()
+    for p in planned:
+        k = (p["site"], p["ad_id"])
+        name = f"{k[0]}/{k[1]}"
+        if k in done:
+            out.append(f"{name}: planned twice")
+            continue
+        done.add(k)
+        last = max(seen.get(k, []), default=None)
+        if last is None or last < lo:
+            out.append(f"{name}: no sighting inside the {policy.window_h} h window of {as_of}")
+            continue
+        if any(f >= last for f in fetched.get(k, [])):
+            out.append(f"{name}: fetched at or after its latest sighting")
+            continue
+        mine = urls.get(k, set()) | {p["url"]}
+        since = max(ok.get(k, []), default=None)
+        dead = sorted(
+            _t(e["at"])
+            for e in gones
+            if (
+                (e["ad_id"] == k[1] and e.get("site") in (k[0], None))
+                if e.get("ad_id")
+                else e.get("url") in mine
+            )
+            and (since is None or _t(e["at"]) >= since)
+        )
+        if dead and not any(s >= dead[0] + readmit and s > dead[-1] for s in seen.get(k, [])):
+            out.append(f"{name}: gone at {dead[-1]:%Y-%m-%dT%H:%M:%SZ} and never re-admitted")
+    return out
+
+
 # ── depth-stratified ad sampling (H4) ───────────────────────────────────────────────────────
 
 
