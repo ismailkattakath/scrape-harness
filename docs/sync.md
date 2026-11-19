@@ -375,6 +375,7 @@ is prefetched.
 |---|---|---|
 | A positive END (the end marker, as above) | `list.status: end`, `end_method: end_marker`, `end_page` = the last page, exact | 0 |
 | A clamp: more than half of a page's ids were already seen earlier in this walk | `end`, `end_method: clamped`, `end_page` = the last non-repeated page; the repeated page's cards are not kept | 0 |
+| A page served at another URL (a redirect, e.g. to page 1) | `end_unknown`, none of its cards kept: a redirect is never an END or a clamp (the measured past-end page is a 404 with no redirect) | 14 |
 | The signed ceiling, `--max-pages` list GETs (the END page included) | `list.status: ceiling_hit`, plus `list.gap` (`since_ref` null) | 0 |
 | An END with `end_page` below the signed `--min-pages` | `short_census`; terminal, never resumed | 14 |
 | A 0-card page with no END, a bare 404, a failed or robots-blocked page | as for every list read (above) | 14, 5 or 13 |

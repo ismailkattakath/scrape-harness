@@ -40,7 +40,8 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
 - `crawl-lists --mode walk` (ADR-0017 §A, the census walk): pages 1, 2, 3, ...,
   each next page enqueued only after the current one is handled, with no
   page-count discovery. It stops at a positive END (`end_page` exact), a clamp
-  (`end_method: clamped`), or its signed ceiling of `--max-pages` list GETs
+  (`end_method: clamped`, a repeat served at the URL asked for; a redirected
+  page is `end_unknown`, exit 14), or its signed ceiling of `--max-pages` list GETs
   (`ceiling_hit`). `--min-pages N` (signed): an END before N pages is
   `short_census`, exit 14. `mode`, `min_pages` and (for a walk) the policy
   digest are signed only when set,

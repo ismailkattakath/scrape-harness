@@ -172,15 +172,28 @@ def test_clamp_to_last(data_dir, tmp_path, marker):
 
 
 def test_redirect_to_page1(data_dir, tmp_path, marker):
-    """A past-end page that redirects to page 1 serves page 1's cards again: a clamp, not new content."""
+    """A page that redirects to page 1 serves page 1's cards again. The measured past-end answer is a 404 with
+    no redirect, so a redirect deep in a walk is a site change or a protection response, never the END (A.1:
+    END needs no redirect): end_unknown, exit 14, and none of the page's cards are kept."""
     d = site(tmp_path, THREE[:2], end=None)
     urls = json.loads((d / "urls.json").read_text())
     (d / "urls.json").write_text(json.dumps(urls | {P(3): {"file": "walk-1.html", "final_url": P(1)}}))
-    assert walk(d) == 0
+    assert walk(d) == crawl.EXIT_PARSE
     assert list_gets() == [P(1), P(2), P(3)]
     doc = the_doc(data_dir)
-    assert doc["list"]["end_method"] == "clamped" and doc["list"]["end_page"] == 2
+    assert doc["list"]["status"] == "end_unknown" and "end_read_page" not in doc["list"]
     assert sorted({o["list"]["page"] for o in rows(doc)}) == [1, 2]
+
+
+def test_a_redirected_walk_page_with_new_ids_keeps_none_of_them(data_dir, tmp_path, marker):
+    """Cards served at another URL are not the page asked for, even when they are new to the walk."""
+    d = site(tmp_path, THREE)
+    urls = json.loads((d / "urls.json").read_text())
+    (d / "urls.json").write_text(json.dumps(urls | {P(2): {"file": "walk-3.html", "final_url": P(9)}}))
+    assert walk(d) == crawl.EXIT_PARSE
+    assert list_gets() == [P(1), P(2)]
+    doc = the_doc(data_dir)
+    assert doc["list"]["status"] == "end_unknown" and {o["list"]["page"] for o in rows(doc)} == {1}
 
 
 def test_a_page_read_again_is_not_a_clamp_of_itself(data_dir, tmp_path, marker, monkeypatch):

@@ -165,6 +165,10 @@ def list_handler(job: crawl.Run, source, max_pages: int):
                              "and no end marker")  # fmt: skip
         # a walk: no pager is read (a windowed pager gives no count), one page ahead. A census row weighs 1; a
         # frontier row has no weight (the walk is neither a census nor a sample of the list)
+        if walk and crawl.redirected(res):  # cards served at another URL are not this page's: never kept, and a
+            lst["status"] = "end_unknown"  # redirect is never an END (A.1), clamp or not; the site changed
+            raise crawl.Stop(crawl.EXIT_PARSE, f"STOPPED: end_unknown: list page {m['page']} was served at another "
+                             f"URL ({len(lp.observations)} cards); a walk keeps no page it did not ask for")  # fmt: skip
         if walk:
             ids, known = [o["ad_id"] for o in lp.observations], walk_seen()
             # the clamp guard: ids kept on an EARLIER page (a page read again by a resume is not its own repeat)
