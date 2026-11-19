@@ -28,7 +28,7 @@ crawl_id, or none) cannot be judged and counts as good.
 
 Gone and parse_failed events are keyed by (site, ad_id). Events without an ad_id (written before the field)
 join by url: an observation's `ad_url` or a listing's `source.url`. A url that matches no ad, or more than
-one, is skipped: the ledger never guesses."""
+one, is skipped: the ledger never guesses. The join is `adkey.event_key`, shared with plan.assert_admissible."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from scrape_harness import corrections
+from scrape_harness import adkey, corrections
 
 STATES = ("alive", "tombstoned", "quarantined", "held")
 
@@ -72,11 +72,6 @@ def _t(s: str) -> datetime:
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
-def _listing_key(r: Mapping) -> tuple:
-    src = r.get("source") or {}
-    return (src.get("site", r.get("site")), r["ad_id"])
-
-
 @dataclass
 class _Acc:
     seen: list = field(default_factory=list)  # (dt, at) good list sightings
@@ -84,27 +79,6 @@ class _Acc:
     reparsed: list = field(default_factory=list)  # (dt, at) reparse listings
     gone: list = field(default_factory=list)  # (dt, event, quarantined)
     failed: list = field(default_factory=list)  # (dt, event)
-
-
-def _url_index(observations: list, listings: list) -> dict[str, set]:
-    idx: dict[str, set] = {}
-    for o in observations:
-        if o.get("ad_url"):
-            idx.setdefault(o["ad_url"], set()).add((o["site"], o["ad_id"]))
-    for r in listings:
-        url = (r.get("source") or {}).get("url")
-        if url:
-            idx.setdefault(url, set()).add(_listing_key(r))
-    return idx
-
-
-def _event_key(e: Mapping, idx: dict[str, set]) -> tuple | None:
-    site, aid = e.get("site"), e.get("ad_id")
-    if site and aid:
-        return (site, aid)
-    keys = idx.get(e.get("url") or "", set())
-    keys = {k for k in keys if (not site or k[0] == site) and (not aid or k[1] == aid)}
-    return next(iter(keys)) if len(keys) == 1 else None
 
 
 def _fold(site: str, ad_id: str, a: _Acc, rules: Rules) -> Ad:
@@ -233,16 +207,16 @@ def build(
             acc((o["site"], o["ad_id"])).seen.append((_t(o["seen_at"]), o["seen_at"]))
     for r in listings:
         bucket = (
-            acc(_listing_key(r)).reparsed
+            acc(adkey.listing_key(r)).reparsed
             if r.get("fetch_reason") == "reparse"
-            else acc(_listing_key(r)).fetched
+            else acc(adkey.listing_key(r)).fetched
         )
         bucket.append((_t(r["fetched_at"]), r["fetched_at"]))
-    idx = _url_index(observations, listings)
+    idx = adkey.url_index(observations, listings)
     for e in events:
         if e.get("kind") not in ("gone", "parse_failed"):
             continue
-        k = _event_key(e, idx)
+        k = adkey.event_key(e, idx)
         if k is None:
             continue
         if e["kind"] == "parse_failed":

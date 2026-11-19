@@ -205,6 +205,28 @@ def test_the_postcondition_refuses_a_gone_ad(with_id):
     assert "gone" in v
 
 
+@pytest.mark.parametrize("site", [SITE, None])  # a legacy gone names its site, or not even that
+def test_the_postcondition_joins_a_legacy_gone_by_the_ledgers_rule_a_url_naming_two_ads_is_skipped(site):
+    """One url-join rule (adkey.event_key) for the ledger and the postcondition: a url-only gone whose url
+    maps to two ads joins neither, so the gate admits both and the postcondition must not refuse the plan."""
+    a = obs_at(0, "2026-01-15T11:00:00Z")
+    b = obs_at(1, "2026-01-15T11:00:00Z") | {"ad_url": a["ad_url"]}
+    e = gone(a, "2026-01-14T23:00:00Z", with_id=False) | {"site": site}
+    pool, _, as_of = cli.fetch_pool(([a, b], [], [e], []), POL, T)
+    assert {c["obs"]["ad_id"] for c in pool} == {a["ad_id"], b["ad_id"]}
+    assert check(planned(a, b), [a, b], events=[e], as_of=as_of) == []
+
+
+def test_the_postcondition_joins_an_ad_id_gone_without_a_site_by_the_ledgers_rule():
+    """An event with an ad_id but no site resolves through its url, as in the ledger: a url naming another
+    ad does not tombstone this one."""
+    a, other = obs_at(0, "2026-01-15T11:00:00Z"), obs_at(1, "2026-01-15T11:00:00Z")
+    e = gone(other, "2026-01-15T10:30:00Z") | {"site": None, "ad_id": a["ad_id"]}
+    pool, _, as_of = cli.fetch_pool(([a, other], [], [e], []), POL, T)
+    assert {c["obs"]["ad_id"] for c in pool} == {a["ad_id"], other["ad_id"]}
+    assert check(planned(a, other), [a, other], events=[e], as_of=as_of) == []
+
+
 def test_the_postcondition_refuses_a_stale_sighting_a_fresh_fetch_and_a_duplicate():
     stale = obs_at(0, "2026-01-01T00:00:00Z")
     fetched = obs_at(1, "2026-01-15T10:00:00Z")
@@ -241,7 +263,8 @@ def test_a_selector_bug_is_refused_exit_14_before_any_get(data_dir, tmp_path, mo
 # ── property: everything the gate admits passes the postcondition ───────────────────────────────────
 
 BASE = datetime(2026, 1, 15, 12, tzinfo=UTC)
-KINDS = ["seen", "seen_aborted", "fetch", "reparse", "gone_weak", "gone_positive", "void", "quarantine"]
+KINDS = ["seen", "seen_aborted", "fetch", "reparse", "gone_weak", "gone_positive", "gone_legacy", "gone_nosite",
+         "void", "quarantine"]  # fmt: skip
 event_st = st.tuples(
     st.integers(0, 2),  # ad
     st.sampled_from(KINDS),
@@ -257,16 +280,19 @@ def correction_of(run_id, reconciled, at):
 
 
 @settings(max_examples=300, deadline=None)
-@given(st.lists(event_st, max_size=16), st.integers(0, 6))
-def test_property_the_gate_and_the_postcondition_agree(evs, budget):
+@given(st.lists(event_st, max_size=16), st.integers(0, 6), st.booleans())
+def test_property_the_gate_and_the_postcondition_agree(evs, budget, shared):
     """A false positive of the postcondition is terminal in a refresh, so: whatever the gate admits passes.
-    The world mixes good and aborted crawls, OK fetches and reparses, weak and positive gones from two runs,
-    and voids and weak-scoped quarantines of those runs."""
+    The world mixes good and aborted crawls, OK fetches and reparses, weak and positive gones from two runs
+    (some legacy: joined by url only, or with an ad_id but no site), voids and weak-scoped quarantines of those
+    runs, and (shared) two ads listed under ONE url, so a url-only gone is ambiguous."""
     observations, listings, events = [], [], []
     runs = [{"run_id": "BAD", "command": "crawl-lists", "status": "aborted"}]
     for ad, kind, h in sorted(evs, key=lambda x: x[2]):
         at = iso(BASE + timedelta(hours=h))
         o = card_obs(ad, at) | {"card_hash": f"sha256:{(h // 48) % 2:016x}"}
+        if shared and ad == 2:
+            o["ad_url"] = card_obs(1, at)["ad_url"]
         run = "R1" if h % 2 else "R2"
         if kind == "seen":
             observations.append(o)
@@ -274,6 +300,10 @@ def test_property_the_gate_and_the_postcondition_agree(evs, budget):
             observations.append(o | {"crawl_id": "BAD"})
         elif kind in ("fetch", "reparse"):
             listings.append(listing(o, at, "new" if kind == "fetch" else "reparse"))
+        elif kind == "gone_legacy":
+            events.append(gone(o, at, run_id=run, with_id=False))
+        elif kind == "gone_nosite":
+            events.append(gone(o, at, run_id=run) | {"site": None})
         elif kind.startswith("gone"):
             events.append(gone(o, at, "served_list" if kind == "gone_weak" else "expired_notice", run_id=run))
         elif kind == "void":

@@ -196,17 +196,18 @@ def assert_admissible(
     """The violations (empty: admissible) of a plan of ads {site, ad_id, url}, read from the RAW records.
 
     Deliberately NOT built on `eligible`, `select_ads` or `liveness`: it is the independent check that a selector
-    bug cannot pass. Every rule is a NECESSARY condition of the gate, so an ad the gate admits always passes:
+    bug cannot pass. It shares with the ledger only `adkey`, the rule for which ad an event names. Every rule is a NECESSARY condition of the gate, so an ad the gate admits always passes:
       - no ad twice;
       - its latest sighting (any crawl) is inside the policy window of as_of;
       - no listing fetched at or after its latest sighting (the gate plans a fetched ad only on a newer card);
-      - no gone event (by ad_id, or by its url) at or after its latest OK fetch, unless a sighting re-admits it:
+      - no gone event (joined to the ad by `adkey.event_key`, the ledger's own join rule, so a legacy url-only
+        gone whose url names two ads joins neither) at or after its latest OK fetch, unless a sighting re-admits it:
         one at least readmit_h after the earliest such gone and after the latest one. An operator `void` of the
         gone's run (corrections.gone_effect) drops it;
       - with the plan's budget B: at most ceil(rho * B) revisits, an ad with ANY listing being a revisit (the
         gate's `new` is exactly "no listing"). Without B (a superseding queue: a subset of the plan that
         queued it, capped only if that plan was) the rule is not checked."""
-    from . import corrections
+    from . import adkey, corrections
 
     observations, listings, events = list(observations), list(listings), list(events)
     lo = _t(as_of) - policy.window
@@ -217,21 +218,20 @@ def assert_admissible(
         seen.setdefault((o["site"], o["ad_id"]), []).append(_t(o["seen_at"]))
     fetched: dict[tuple, list[datetime]] = {}
     ok: dict[tuple, list[datetime]] = {}
-    urls: dict[tuple, set] = {}
     for r in listings:
-        src = r.get("source") or {}
-        k = (src.get("site", r.get("site")), r["ad_id"])
+        k = adkey.listing_key(r)
         fetched.setdefault(k, []).append(_t(r["fetched_at"]))
         if r.get("fetch_reason") != "reparse":
             ok.setdefault(k, []).append(_t(r["fetched_at"]))
-        if src.get("url"):
-            urls.setdefault(k, set()).add(src["url"])
-    gones = [
-        e
-        for e in events
-        if e.get("kind") == "gone"
-        and corrections.gone_effect(fixed.get(e.get("run_id")), e.get("reason")) != "void"
-    ]
+    idx = adkey.url_index(observations, listings)
+    gone_at: dict[tuple, list[datetime]] = {}
+    for e in events:
+        if e.get("kind") != "gone":
+            continue
+        if corrections.gone_effect(fixed.get(e.get("run_id")), e.get("reason")) == "void":
+            continue
+        if (k := adkey.event_key(e, idx)) is not None:
+            gone_at.setdefault(k, []).append(_t(e["at"]))
     out, done = [], set()
     for p in planned:
         k = (p["site"], p["ad_id"])
@@ -247,18 +247,8 @@ def assert_admissible(
         if any(f >= last for f in fetched.get(k, [])):
             out.append(f"{name}: fetched at or after its latest sighting")
             continue
-        mine = urls.get(k, set()) | {p["url"]}
         since = max(ok.get(k, []), default=None)
-        dead = sorted(
-            _t(e["at"])
-            for e in gones
-            if (
-                (e["ad_id"] == k[1] and e.get("site") in (k[0], None))
-                if e.get("ad_id")
-                else e.get("url") in mine
-            )
-            and (since is None or _t(e["at"]) >= since)
-        )
+        dead = sorted(at for at in gone_at.get(k, []) if since is None or at >= since)
         if dead and not any(s >= dead[0] + readmit and s > dead[-1] for s in seen.get(k, [])):
             out.append(f"{name}: gone at {dead[-1]:%Y-%m-%dT%H:%M:%SZ} and never re-admitted")
     if budget is not None:
