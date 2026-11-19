@@ -225,8 +225,8 @@ def build_bounds(ttl: str = DEFAULT_TTL, max_ad_requests: int | None = None) -> 
                 cli._deterministic(ns)  # noqa: SLF001 - the signed sample is the one crawled
             cli._check_pages(ns)  # noqa: SLF001
             cli._check_walk(ns)  # noqa: SLF001
-            if cli._walk(ns):  # noqa: SLF001 - the rules a walk is judged by, as its run_plan signs them
-                ns.policy_digest = policy.DEFAULT.digest()
+            for key, val in cli._walk_signed(ns).items():  # noqa: SLF001 - what a walk's run_plan signs
+                setattr(ns, key, val)
             lists.append(approvals.list_args(ns))  # one signed set per step
             if ns.pages:
                 max_lists += len(ns.pages)
@@ -534,7 +534,12 @@ def _print_summary(st: dict) -> None:
                      + (f"  ({x['reason']})" if x.get("reason") else ""))  # fmt: skip
         if lst := x.get("list"):
             lines.append(f"    crawl-lists list: {lst.get('status')}, "
-                         f"{lst.get('observations_written', '-')} observations written")  # fmt: skip
+                         f"{lst.get('observations_written', '-')} observations written"
+                         + (f"; anchored at page {lst['anchor']['page']}" if lst.get("anchor") else ""))  # fmt: skip
+            if lst.get("gap"):
+                from . import cli
+
+                lines.append(f"    GAP {cli.gap_words(lst['gap'])}")
         if ads := x.get("ads"):
             from . import cli
 

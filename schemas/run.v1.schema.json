@@ -442,7 +442,7 @@
             "anchored",
             "clamped"
           ],
-          "description": "ok: pages parsed with cards; zero_yield: page 1 gave 0 cards with no positive END; failed: a handler error; blocked: a challenge or refusal stopped it; parse_drift: too many cards skipped by the parser; past_end / redirected (an evidence run, --snapshot only): the run completed, but a list page answered 404/410 without the end marker, or ended at another URL, so its sightings are not trusted; end: the list positively ENDED (end_read_page; end_page in a walk); end_unknown: a page after page 1 gave 0 cards with no positive END, or carried the end marker on a page that is not an END, or a walk drained with neither an END nor its ceiling (exit 14); short_census (a walk): the list ENDED before min_pages (exit 14); ceiling_hit (a walk): the walk read its signed ceiling of pages before any END. Good crawls: ok, end, ceiling_hit, anchored (liveness.Rules). Reserved for the frontier walk: anchored; clamped is reserved (a clamp is an END, end_method clamped)."
+          "description": "ok: pages parsed with cards; zero_yield: page 1 gave 0 cards with no positive END; failed: a handler error; blocked: a challenge or refusal stopped it; parse_drift: too many cards skipped by the parser; past_end / redirected (an evidence run, --snapshot only): the run completed, but a list page answered 404/410 without the end marker, or ended at another URL, so its sightings are not trusted; end: the list positively ENDED (end_read_page; end_page in a walk); end_unknown: a page after page 1 gave 0 cards with no positive END, or carried the end marker on a page that is not an END, or a walk drained with neither an END nor its ceiling (exit 14); short_census (a walk): the list ENDED before min_pages (exit 14); ceiling_hit (a walk): the walk read its signed ceiling of pages before any END; anchored (a frontier): it stopped at a confirmed anchor (list.anchor). Good crawls: ok, end, ceiling_hit, anchored (liveness.Rules). clamped is reserved (a clamp is an END, end_method clamped)."
         },
         "end_page": {
           "type": "integer",
@@ -459,8 +459,35 @@
           "description": "How the END was found: end_marker (the source's end_selectors), or clamped (a walk: more than half of a page's ids already seen earlier in the walk; that page's cards are not kept)."
         },
         "mode": {
-          "enum": ["walk"],
-          "description": "crawl-lists --mode: walk = pages 1, 2, 3, ..., the next one enqueued only after the current one is handled (ADR-0017 A). Absent: the page-count sample or named pages."
+          "enum": ["walk", "frontier"],
+          "description": "crawl-lists --mode: walk = pages 1, 2, 3, ..., the next one enqueued only after the current one is handled (ADR-0017 A), a census; frontier = the same, and it may stop at an anchor confirmed against its reference crawl (A.2). Absent: the page-count sample or named pages."
+        },
+        "subcategory": {"type": "string", "description": "A walk's subcategory: a later frontier finds its reference by it."},
+        "region": {"type": "string", "description": "A walk's region: a later frontier finds its reference by it."},
+        "k": {"type": "integer", "minimum": 2, "description": "A frontier's signed K: a candidate anchor is K consecutive parsed cards holding consecutive places in the reference's parsed order."},
+        "order": {"type": "string", "description": "A frontier: the source's declared list order. Only bump_desc allows an early stop; any other value walks to a positive END or the ceiling."},
+        "ref_crawl_id": {"type": ["string", "null"], "description": "A frontier's reference crawl, chosen once at its start (plan.frontier_reference; a resume keeps it); null when none existed (a bootstrap)."},
+        "anchor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["page", "confirm_page", "ref_crawl_id"],
+          "description": "A frontier's confirmed anchor: the candidate's page and the ONE confirmation page after it (list.status anchored).",
+          "properties": {
+            "page": {"type": "integer", "minimum": 1},
+            "confirm_page": {"type": "integer", "minimum": 2},
+            "ref_crawl_id": {"type": "string"}
+          }
+        },
+        "gap": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["after_page", "since_ref", "opened_by"],
+          "description": "A frontier's open GAP: the walk opened_by hit its ceiling at after_page, so the bumps between it and since_ref (null: no reference before it) were never read. A later frontier anchored on it carries it on; a census of the list (as the reference) closes it.",
+          "properties": {
+            "after_page": {"type": "integer", "minimum": 1},
+            "since_ref": {"type": ["string", "null"]},
+            "opened_by": {"type": "string"}
+          }
         },
         "stride": {"type": "integer", "minimum": 1, "description": "A walk's stride (1 = census; stride k is deferred)."},
         "ceiling": {"type": "integer", "minimum": 1, "description": "A walk's signed ceiling: every list GET it may send (--max-pages), the END page included."},

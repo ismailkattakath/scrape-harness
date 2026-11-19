@@ -66,7 +66,7 @@ ad's history, in time order, into one state:
 
 A crawl is **good** only when its corrected status is `completed` and its
 `list.status` is `ok`, `end`, `ceiling_hit` or `anchored` (`liveness.good_crawl`,
-an allowlist; `anchored` is reserved for the frontier walk). So the rows a
+an allowlist; `anchored` is the frontier walk's confirmed stop). So the rows a
 crawl kept before a stop never count as sightings: not after `parse_drift`,
 `failed`, `zero_yield`, `end_unknown`, `short_census` or `blocked`, not from an
 evidence run (`past_end`, `redirected`), and not from a run that is `stopped`,
@@ -374,6 +374,78 @@ is prefetched.
 - **The lanes version is now `select_ads.v3`**, because the good-crawl set
   changed: the policy digest moves with it.
 
+## The frontier walk
+
+```
+<cli> crawl-lists --subcategory X --mode frontier --max-pages 30 --plan
+```
+
+`--mode frontier` (ADR-0017 §A.2, §A.3) reads pages 1, 2, 3, ... exactly like
+the census walk (one page ahead, the same END, clamp, ceiling, resume and
+failure rules), and may also **stop early at a confirmed anchor**: the point
+where today's list runs into what the reference crawl already read.
+
+| It stops at | Recorded | Exit |
+|---|---|---|
+| A confirmed anchor (below), only when the source declares `order = "bump_desc"` | `list.status: anchored`, `list.anchor{page, confirm_page, ref_crawl_id}` | 0 |
+| A positive END or a clamp | `end`, as for the census | 0 |
+| The signed ceiling | `ceiling_hit`, plus `list.gap` | 0 |
+
+- **Early stop is opt-in by the source.** Optional `Source.order`, default
+  `unordered`. Only the exact value `bump_desc` allows an anchor; anything
+  else walks to a positive END or the ceiling. That costs list GETs, never ad
+  views. A plug-in declares `bump_desc` only behind an offline evidence test.
+  The run doc records `list.order`.
+- **The reference** (`plan.frontier_reference`, pure) is the latest
+  crawl-lists run of the same site, subcategory and region that was read
+  contiguously from page 1 (`mode` walk or frontier, stride 1), whose
+  corrected status is `completed` and whose `list.status` is `anchored`, `end`
+  or `ceiling_hit` (`plan.REFERENCE_STATUS`). `ok` (a sample or named pages) and
+  every terminal stop are never a reference. Walks record `list.subcategory`
+  and `list.region` so a later frontier can find them. The reference is chosen
+  ONCE, when the run starts, and recorded as `list.ref_crawl_id` (null: none
+  existed, a bootstrap). A resume keeps it, and its plan binds it.
+- **Candidate** (`plan.frontier_stop`, pure): on the page just before the
+  current one, the topmost window of K consecutive parsed cards (K =
+  `SyncPolicy.frontier_k`, 5) whose ids hold **consecutive places** in the
+  reference's parsed order (page, then position), none seen on an earlier page
+  of this walk, whose last card sat on a reference page before the
+  reference's last page read. That place is judged in the reference, not by
+  the walk's page number: new bumps push the boundary deeper every day, often
+  past the reference's own last page.
+- **Confirmation:** the ONE next page. At least `confirm_share` (90%) of its
+  parsed cards are reference ids below the candidate's last card, and they keep
+  the reference order with at most `confirm_inversions` (5%) adjacent
+  inversions. Otherwise the candidate is dropped and the walk goes on; the
+  confirmation page is itself searched for the next candidate. The rule reads
+  only this crawl's kept rows and the reference's, so a stop between the
+  candidate page and its confirmation page resumes with no saved candidate.
+  The confirmation page is a list GET under the ceiling, and its rows are kept.
+- **Why each case cannot stop early** (tested): random re-bumps of known ads
+  are almost never adjacent in the reference; a pinned block on page 1 is
+  followed by today's new bumps, so the confirmation fails; a rotated block is
+  followed by new ids, or by old content out of order (the inversion check);
+  an ad pushed across a page boundary was seen earlier in this walk.
+- **The GAP.** A frontier that hits its ceiling records `list.gap{after_page,
+  since_ref, opened_by}`: the bumps past its ceiling, back to its reference
+  (`since_ref` null in a bootstrap), were never read. A later frontier that
+  anchors on it carries the same `gap` on; a census as the reference closes it
+  (it has no gap). A frontier that reads to its END records none. The crawl
+  prints a `GAP:` line, the run card names an open GAP of the reference, and
+  the refresh summary prints `GAP after page N (since reference R)`.
+- **Rows** carry `sample_weight` null and `page_count` null: a frontier is
+  neither a census nor a sample of the list.
+- **Signed.** `mode: frontier`, `k` and `policy_digest` join the plan and a
+  refresh's list set (`approvals.LIST_KEYS_IF_SET`, only when set). The
+  confirmation thresholds ride in the digest. `--min-pages` is a census guard
+  and is refused with a frontier, as are `--stride` other than 1, `--pages`,
+  `--page-count`, `--start` and `--seed`.
+- **Good crawls.** `anchored` is good (liveness.Rules, unchanged), and a
+  refresh's list postcondition passes it.
+- **The lanes version is now `select_ads.v4`** (the anchor and reference rules
+  are pinned rule code in `plan.py`); the policy digest moves with it and with
+  the three new `SyncPolicy` fields.
+
 ## Known gaps in slice 1
 
 - **A held ad has no clear path yet.** `reparse` walks only listings that have
@@ -389,8 +461,15 @@ is prefetched.
 - **The refresh's plan card cannot show the ad selection.** Inside a refresh,
   freshness depends on the list steps that have not run yet. The selection
   appears in the end summary and on the fetch-ads step's own run card.
-- **The frontier walk and the stride-k depth walk are not built yet.** The
-  census walk is (above). The page-count path stays, but it now fails loudly.
+- **The stride-k depth walk is not built yet.** The census and frontier walks
+  are (above). The page-count path stays, but it now fails loudly.
+- **The frontier's reference is chosen at run time, not signed.** It is
+  recorded on the run doc and bound by a resume's plan. It only decides where
+  the walk may stop early, inside the signed ceiling, so it can save list GETs
+  but never add one. `Source.order` is not signed either (no `source_digest`
+  yet).
+- **Run docs created in the same second tie on `created_at`.** The reference
+  is then the higher `run_id`: deterministic, not necessarily the later run.
 - **A census walk has no parser-drift ratio guard yet** (ADR-0017 A.4,
   skipped/cards > 0.5). A broken card selector still stops it at once: 0 cards
   with no END is exit 14.

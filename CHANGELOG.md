@@ -44,6 +44,20 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   continues from the next unread page within what the ceiling leaves.
   run.v1 `list` gains `end_read_page`, `mode`, `stride`, `ceiling`,
   `min_pages`, `pages_read` and `settled`. Stride k is refused (deferred).
+- `crawl-lists --mode frontier` (ADR-0017 §A.2, §A.3): the census walk's
+  reading, plus an early stop at an anchor confirmed against the latest
+  reference crawl (pure `plan.frontier_reference` and `plan.frontier_stop`),
+  only when the source declares the optional `Source.order = "bump_desc"`
+  (default `unordered`: to a positive END or the ceiling). A candidate is K
+  consecutive cards holding consecutive places in the reference's parsed order;
+  one more page confirms it (90% reference ids below it, at most 5% inversions).
+  `list.status: anchored`, `list.anchor`, `list.ref_crawl_id`, `list.order`,
+  `list.k`; a ceiling records `list.gap`, carried by later anchored frontiers
+  until a census is the reference, and shown as GAP. `SyncPolicy` gains
+  `frontier_k`, `confirm_share` and `confirm_inversions`; the lanes version is
+  `select_ads.v4`. `mode`, `k` and the policy digest are signed only when set.
+  Walks record `list.subcategory` and `list.region`. See "The frontier walk" in
+  [docs/sync.md](docs/sync.md).
 - `ListPage.skipped` (optional): cards the parser could not read.
 - Exit 14 (`crawl.EXIT_PARSE`): a parse or yield stop, terminal, with a
   `parse` incident (and `gone_storm` for a breaker trip).

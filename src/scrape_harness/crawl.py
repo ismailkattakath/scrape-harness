@@ -1140,7 +1140,7 @@ async def _crawl(
         event(rid, "failed_request", ctx.request.url, type(error).__name__)
         if walk and ctx.request.user_data.get("kind", "list") == "list":
             lst = job.doc.get("list") or {}
-            if lst.get("mode") == "walk":  # a failed GET settled too: the walk's ceiling counts it (A.4)
+            if lst.get("mode") in ("walk", "frontier"):  # a failed GET settled too: the ceiling counts it
                 lst["settled"] = lst.get("settled", 0) + 1
             # crawlee has marked it handled (ERROR), so the queue alone would drain to `completed` with a
             # hole. Queue the same page again under a fresh key, for the resume, and stop now. Also when a
