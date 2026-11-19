@@ -120,6 +120,23 @@ def test_resume_of_a_fetch_ads_run_is_a_filtered_new_run(world, data_dir):
     assert main(["crawl", "resume", "--run-id", world["old"], *fix(world["fx"])]) == crawl.EXIT_PARSE  # once
 
 
+@pytest.mark.parametrize("scope", ["failed", "pending", None])  # None: a successor before the field existed
+def test_resume_is_refused_only_when_the_pending_scope_was_taken_over(world, scope):
+    """One check for resume and --supersede: a `--failed` successor took over only the FAILED scope, so the
+    old run's pending ads are still its own to resume; a pending (or legacy, unscoped) successor took them."""
+    a, b, c, d = world["ads"]
+    succ = crawl.Run.new("fetch-ads", "desktop", SITE)
+    if scope:
+        succ.doc["supersede_scope"] = scope
+    succ.save()
+    crawl.event(world["old"], "superseded", None, succ.doc["run_id"], site=SITE)
+    code = main(["crawl", "resume", "--run-id", world["old"], *fix(world["fx"])])
+    if scope == "failed":
+        assert code == 0 and ad_gets() == [c["ad_url"]]
+    else:
+        assert code == crawl.EXIT_PARSE and ad_gets() == []
+
+
 def test_resume_refuses_an_aborted_fetch_ads_run(world):
     crawl.correct_status(world["old"], "aborted", "interrupted", "synthetic")
     assert main(["crawl", "resume", "--run-id", world["old"], *fix(world["fx"])]) == crawl.EXIT_PARSE

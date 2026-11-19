@@ -729,6 +729,20 @@ def _dry_run_gates(args: argparse.Namespace, todo: list[tuple[str, dict]]) -> di
     return out
 
 
+def _taken_over(run_id: str, scope: str) -> str | None:
+    """The run that already took over `scope` (pending | failed) of fetch-ads run `run_id`, or None. The ONE
+    check behind --supersede and `crawl resume`: each scope is taken over once, and a successor written before
+    the supersede_scope field took the pending scope."""
+    for e in store.read("events"):
+        if (
+            e.get("run_id") == run_id
+            and e["kind"] == "superseded"
+            and crawl.Run.load(e["reason"]).doc.get("supersede_scope", "pending") == scope
+        ):
+            return e["reason"]
+    return None
+
+
 def _superseding(args: argparse.Namespace, statuses: tuple[str, ...] = ("stopped", "aborted")):
     """fetch-ads --supersede RUN: that stopped run's PENDING ad requests (or, with --failed, its FAILED ones),
     as a NEW run (its own plan, approval and proxy), each admitted through the gate again (plan.admit, in
@@ -743,12 +757,9 @@ def _superseding(args: argparse.Namespace, statuses: tuple[str, ...] = ("stopped
         raise SystemExit(f"--supersede needs a {' or '.join(statuses)} fetch-ads run; {args.supersede} is "
                          f"{old.doc['command']} / {crawl.status_of(old.doc)}")  # fmt: skip
     scope = "failed" if getattr(args, "failed", False) else "pending"
-    for e in store.read("events"):
-        if e.get("run_id") == old.doc["run_id"] and e["kind"] == "superseded":
-            successor = crawl.Run.load(e["reason"]).doc
-            if successor.get("supersede_scope", "pending") == scope:  # runs before the field took "pending"
-                raise SystemExit(f"{args.supersede}: its {scope} ads were already taken over by "
-                                 f"{e['reason']}; superseding again would GET them twice")  # fmt: skip
+    if succ := _taken_over(old.doc["run_id"], scope):
+        raise SystemExit(f"{args.supersede}: its {scope} ads were already taken over by {succ}; superseding "
+                         "again would GET them twice")  # fmt: skip
     if scope == "failed":
         reqs = [r for r in crawl.failed_requests(old) if r["kind"] == "ad"]
         logged = {e["url"] for e in store.read("events")
@@ -1006,15 +1017,17 @@ def cmd_crawl_resume(args: argparse.Namespace) -> int:
 def _resume_fetch_ads(args: argparse.Namespace, job: crawl.Run) -> int:
     """A fetch-ads run is never resumed in place: its persisted queue was planned against older records. It is
     rebuilt as a NEW run of its pending ads, each admitted through the gate again (the supersede path), and
-    refused (exit 14, before any gate) when the run is aborted, already superseded, or older than the policy
-    window W (its sightings are no longer fresh)."""
+    refused (exit 14, before any gate) when the run is aborted, its pending scope was already taken over
+    (`_taken_over`), or it is older than the policy window W (its sightings are no longer fresh)."""
     pol = policy.from_args(args)
     rid, now = job.doc["run_id"], _now()
-    succ = [e["reason"] for e in store.read("events") if e.get("run_id") == rid and e["kind"] == "superseded"]
+    succ = _taken_over(
+        rid, "pending"
+    )  # a --failed successor took only the failed scope: pending is still its own
     why = (
         "it tripped the gone-storm breaker" if (job.doc.get("breaker") or {}).get("tripped")
         else "it was aborted" if crawl.status_of(job.doc) == "aborted"
-        else f"it was superseded by {succ[-1]}" if succ
+        else f"it was superseded by {succ}" if succ
         else f"it is older than the {pol.window_h} h window" if plan.ts(job.doc["created_at"]) < now - pol.window
         else None
     )  # fmt: skip
