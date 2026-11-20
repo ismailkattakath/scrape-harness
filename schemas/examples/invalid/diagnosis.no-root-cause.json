@@ -1,0 +1,10 @@
+{
+  "schema": "diagnosis.v1",
+  "kind": "diagnosis",
+  "symptom": "fetch-ads wrote listings with no price since the last run",
+  "evidence": [{ "file": "DATA:runs/2026-01-16t07-00-00z-fetch-ads.json", "quote": "\"parse_failed\": 12" }],
+  "fix": { "change": "read the price from the new class", "files": ["examples/example_site/source.py"] },
+  "tests": ["test_price_is_read_from_the_new_class"],
+  "confidence": "high",
+  "blocked_on": null
+}

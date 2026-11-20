@@ -231,8 +231,10 @@ def test_agent_contract_gates_against_the_real_cli(tmp_path, gate, agent, contra
         "agent_type": f"scrape-harness:{agent}",
         "stop_hook_active": False,
     }
-    good = (EXAMPLES / f"{stem}.example.json").read_text()
-    assert run(gate, ev | {"last_assistant_message": good}, env=env).returncode == 0
+    goods = sorted(EXAMPLES.glob(f"{stem}*.example.json"))  # diagnosis: a diagnosis and a requested change
+    for good in goods:
+        r = run(gate, ev | {"last_assistant_message": good.read_text()}, env=env)
+        assert r.returncode == 0, (good.name, r.stderr)
     for bad in sorted((EXAMPLES / "invalid").glob(f"{stem}.*.json")) + ["the run went fine"]:
         msg = bad if isinstance(bad, str) else bad.read_text()
         r = run(gate, ev | {"last_assistant_message": msg}, env=env)
