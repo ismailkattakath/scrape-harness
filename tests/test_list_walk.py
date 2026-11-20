@@ -360,7 +360,8 @@ def test_resume_mid_walk(data_dir, tmp_path, marker):
     assert walk(d, "--max-pages", "10") == crawl.EXIT_CHALLENGE
     assert list_gets() == [P(1), P(2)]
     doc = the_doc(data_dir)
-    assert doc["list"]["pages_read"] == 1 and doc["list"]["settled"] == 1
+    # the challenged GET was sent: it settles too (the resume sends page 2 again, inside the ceiling)
+    assert doc["list"]["pages_read"] == 1 and doc["list"]["settled"] == 2
     (d / "urls.json").write_text(json.dumps(urls))
     FixtureHttpClient.log.clear()
     assert main(["crawl", "resume", "--run-id", doc["run_id"], *fix(d)]) == 0
@@ -395,31 +396,44 @@ def test_resume_keeps_the_signed_ceiling(data_dir, tmp_path, marker, monkeypatch
     assert walk(d, "--max-pages", "3") == crawl.EXIT_CHALLENGE
     (d / "urls.json").write_text(json.dumps(urls))
     rid = the_doc(data_dir)["run_id"]
-    FixtureHttpClient.log.clear()
     assert main(["crawl", "resume", "--run-id", rid, "--max-pages", "60", *fix(d)]) == 0
-    assert list_gets() == [P(2), P(3)]  # 3 list GETs in all: never page 4
-    assert the_doc(data_dir)["list"]["status"] == "ceiling_hit"
+    # the full log across both runs: 3 list GETs in all, the challenged one included; never page 4
+    assert list_gets() == [P(1), P(2), P(2)]
+    lst = the_doc(data_dir)["list"]
+    assert lst["status"] == "ceiling_hit" and lst["settled"] == 3
     assert {k: plans[-1][k] for k in ("mode", "ceiling", "settled")} == {
         "mode": "walk",
         "ceiling": 3,
-        "settled": 1,
+        "settled": 2,
     }
 
 
 def test_resume_after_failed_page_within_ceiling(data_dir, tmp_path, marker):
-    """R10: a failed list GET settles too, so the walk's ceiling counts it, and the resume reads the lost page."""
+    """R10: a failed list GET settles too, and so does its retry (every GET sent counts against the signed
+    ceiling), and the resume reads the lost page inside what is left."""
     d = site(tmp_path, THREE)
     urls = json.loads((d / "urls.json").read_text())
     (d / "urls.json").write_text(json.dumps(urls | {P(2): {"file": "walk-2.html", "status": 500}}))
     assert walk(d, "--max-pages", "4") == crawl.EXIT_INCOMPLETE
+    assert list_gets() == [P(1), P(2), P(2)]  # page 2 and its one retry
     doc = the_doc(data_dir)
-    assert doc["status"] == "stopped" and doc["list"]["settled"] == 2 and doc["list"]["pages_read"] == 1
+    assert doc["status"] == "stopped" and doc["list"]["settled"] == 3 and doc["list"]["pages_read"] == 1
     (d / "urls.json").write_text(json.dumps(urls))
-    FixtureHttpClient.log.clear()
     assert main(["crawl", "resume", "--run-id", doc["run_id"], *fix(d)]) == 0
-    assert list_gets() == [P(2), P(3)]  # the lost page, then one more: 4 settled, the ceiling
+    assert list_gets() == [P(1), P(2), P(2), P(2)]  # the lost page: 4 GETs in all, the ceiling
     lst = the_doc(data_dir)["list"]
-    assert lst["status"] == "ceiling_hit" and lst["settled"] == 4 and lst["pages_read"] == 3
+    assert lst["status"] == "ceiling_hit" and lst["settled"] == 4 and lst["pages_read"] == 2
+
+
+def test_the_get_that_reaches_the_ceiling_is_never_retried(data_dir, tmp_path, marker):
+    """A retry of the last GET the ceiling allows would be one GET past it: that GET fails without a retry, and
+    the walk, its ceiling spent, is not resumed."""
+    d = site(tmp_path, THREE)
+    urls = json.loads((d / "urls.json").read_text())
+    (d / "urls.json").write_text(json.dumps(urls | {P(2): {"file": "walk-2.html", "status": 500}}))
+    assert walk(d, "--max-pages", "2") == crawl.EXIT_INCOMPLETE
+    assert list_gets() == [P(1), P(2)]
+    assert the_doc(data_dir)["list"]["settled"] == 2
 
 
 def test_a_walk_whose_ceiling_is_spent_is_not_resumed(data_dir, tmp_path, marker, capsys):

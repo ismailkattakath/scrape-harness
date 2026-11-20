@@ -230,15 +230,16 @@ def test_a_failed_frontier_page_settles_and_resumes_within_the_ceiling(data_dir,
     d = site(tmp_path, REF)
     urls = json.loads((d / "urls.json").read_text())
     (d / "urls.json").write_text(json.dumps(urls | {P(2): {"file": "walk-2.html", "status": 500}}))
-    assert frontier(d, "--max-pages", "4") == crawl.EXIT_INCOMPLETE
+    assert frontier(d, "--max-pages", "5") == crawl.EXIT_INCOMPLETE
     doc = latest_doc()
-    assert doc["status"] == "stopped" and doc["list"]["settled"] == 2 and doc["list"]["pages_read"] == 1
+    # page 2 and its retry: every GET sent settles
+    assert doc["status"] == "stopped" and doc["list"]["settled"] == 3 and doc["list"]["pages_read"] == 1
     (d / "urls.json").write_text(json.dumps(urls))
-    FixtureHttpClient.log.clear()
     assert main(["crawl", "resume", "--run-id", doc["run_id"], *fix(d)]) == 0
-    assert list_gets() == [P(2), P(3)]  # the lost page, then one more: 4 settled, the ceiling
+    # the full log: the lost page, then one more: 5 GETs in all, the ceiling
+    assert list_gets() == [P(1), P(2), P(2), P(2), P(3)]
     lst = doc_of(doc["run_id"])["list"]
-    assert lst["status"] == "ceiling_hit" and lst["settled"] == 4 and lst["pages_read"] == 3
+    assert lst["status"] == "ceiling_hit" and lst["settled"] == 5 and lst["pages_read"] == 3
 
 
 def test_a_candidate_on_the_ceiling_page_is_ceiling_hit(data_dir, tmp_path, marker, ordered):

@@ -493,7 +493,7 @@
         "ceiling": {"type": "integer", "minimum": 1, "description": "A walk's signed ceiling: every list GET it may send (--max-pages), the END page included."},
         "min_pages": {"type": "integer", "minimum": 1, "description": "A walk's signed --min-pages: an END with end_page below it is short_census."},
         "pages_read": {"type": "integer", "minimum": 0, "description": "A walk's list pages handled, across every attempt (the END page included)."},
-        "settled": {"type": "integer", "minimum": 0, "description": "A walk's list GETs that settled, handled or failed, across every attempt: the ceiling counts these."},
+        "settled": {"type": "integer", "minimum": 0, "description": "A walk's list GETs sent, across every attempt (retries and GETs a challenge or a crash handed back included), counted before each GET: the ceiling counts these."},
         "snapshot": {
           "type": "object",
           "additionalProperties": false,

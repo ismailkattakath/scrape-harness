@@ -846,6 +846,16 @@ async def _crawl(
     @crawler.pre_navigation_hook
     async def count_page(ctx) -> None:  # every page GET attempt, HTTP or browser, retries included
         counts["ad_pages" if ctx.request.user_data.get("kind") == "ad" else "list_pages"] += 1
+        lst = job.doc.get("list") or {}
+        if walk and ctx.request.user_data.get("kind", "list") == "list" and lst.get("mode") in ("walk", "frontier"):
+            # a walk's signed ceiling counts every list GET it SENDS (a retry, a challenged GET, a page a crash
+            # or a stop hands back): counted here, before the GET, and saved, so a resume's cap (ceiling -
+            # settled) never lets the walk send more than it signed. The GET that reaches the ceiling is never
+            # retried: its retry would be one GET past it.
+            lst["settled"] = lst.get("settled", 0) + 1
+            if lst["settled"] >= lst.get("ceiling", 0):
+                ctx.request.no_retry = True
+            job.save()
         started[ctx.request.unique_key] = time.monotonic()
         attempts.navigated(ctx.request.unique_key)
         page = getattr(ctx, "page", None)
@@ -1140,9 +1150,6 @@ async def _crawl(
         log_page(ctx.request, None)
         event(rid, "failed_request", ctx.request.url, type(error).__name__)
         if walk and ctx.request.user_data.get("kind", "list") == "list":
-            lst = job.doc.get("list") or {}
-            if lst.get("mode") in ("walk", "frontier"):  # a failed GET settled too: the ceiling counts it
-                lst["settled"] = lst.get("settled", 0) + 1
             # crawlee has marked it handled (ERROR), so the queue alone would drain to `completed` with a
             # hole. Queue the same page again under a fresh key, for the resume, and stop now. Also when a
             # stop is already under way: a page handed back once (a reclaim spends its one retry) that is

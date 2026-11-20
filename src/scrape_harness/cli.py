@@ -110,9 +110,9 @@ def list_handler(job: crawl.Run, source, max_pages: int):
 
     def walked(lst: dict, m: dict) -> list[dict]:
         """A walk page is handled: count it, save the walk's state, and enqueue the NEXT page only while the
-        signed ceiling (every list GET, the END page included) leaves room. Never two pages ahead."""
+        signed ceiling (every list GET sent, the END page and retries included: `settled`, counted by the crawl
+        before each GET) leaves room. Never two pages ahead."""
         lst["pages_read"] = lst.get("pages_read", 0) + 1
-        lst["settled"] = lst.get("settled", 0) + 1
         job.save()  # the walk's state after every page: a resume continues from it
         if lst.get("anchor"):  # a confirmed anchor: the rest of the list is what the reference read
             return []

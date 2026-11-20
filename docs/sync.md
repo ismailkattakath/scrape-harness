@@ -394,9 +394,12 @@ is prefetched.
 - **Rows.** Each kept card has `sample_weight` 1 and `page_count` null: the
   run doc's `end_page` is the count.
 - **State on the run doc**, saved after every page: `list{mode, stride,
-  ceiling, min_pages, pages_read, settled}`. `settled` counts handled AND
-  failed list GETs, the way crawlee's own cap counts them; the walk enqueues
-  the next page only while `settled < ceiling`.
+  ceiling, min_pages, pages_read, settled}`. `settled` counts every list GET
+  the walk SENDS, counted and saved just before the GET: a retry, a GET a
+  challenge stops, a page a crash or a stop hands back. So the signed ceiling
+  is the walk's GETs across every attempt, never more. The walk enqueues the
+  next page only while `settled < ceiling`, and the GET that reaches the
+  ceiling is never retried (its retry would be one past it).
 - **Resume** continues from the next unread page: the page that stopped the
   run (a challenge hands it back; a failed page is queued again). It is bounded
   by what the signed ceiling leaves (`ceiling - settled`), never by the resume's
