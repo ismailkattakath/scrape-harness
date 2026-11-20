@@ -26,6 +26,11 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   A test pins the skew signal the plugin reads: an unknown contract name
   exits 1 with `unknown contract '<name>'`; an invalid object exits 2. The
   steward and gate-list tests now pass against both plugin pins.
+- Two tests pin the plugin to the core (each skips before plugin 1.3.0):
+  - The plugin's SessionStart status line reads `status.json` at the same
+    path as `status.read_path()`, from the state env, `XDG_STATE_HOME` or the
+    home default, and names the status.v1 values it reads.
+  - The plugin's route-clause test uses the same regex as `claude-md`.
 - Two agent-answer contracts, strict (no unknown key):
   - `run_report.v1` is the run-steward's final answer: the run ids, a state
     (running, finished, stopped or refused), the exit code and stop reason,
