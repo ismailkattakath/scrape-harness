@@ -40,7 +40,7 @@ def consumer_cmd(tmp_path, monkeypatch):
         "    g = sub.add_parser('geo-test', help='test: a paid stand-in')\n"
         "    g.add_argument('--dry-run', action='store_true')\n"
         "    cli.network_args(g)\n"
-        "    t = sub.add_parser('token-test', help='test: one approval flag only')\n"
+        "    t = sub.add_parser('token-test', aliases=['tok-b', 'tok-a'], help='test: one approval flag only')\n"
         "    cli.approve_network_arg(t)\n"
     )
     text = PIPELINE.read_text()
@@ -96,6 +96,7 @@ def test_the_tree_is_complete_nested_and_skips_help(capsys):
     assert by[("crawl-lists", "--subcategory")] | {"help": None} == {
         "kind": "option",
         "cmd": "crawl-lists",
+        "aliases": None,
         "opt": "--subcategory",
         "takes_value": True,
         "required": True,
@@ -175,7 +176,7 @@ def test_check_exit_codes_and_diff(capsys, tmp_path):
     capsys.readouterr()
     assert cli.main(["cli", "spec", "--check", str(drift)]) == 1
     out = capsys.readouterr().out
-    assert out.startswith("--- ") and '-{"choices"' in out and '"--strode"' in out
+    assert out.startswith("--- ") and '-{"aliases"' in out and '"--strode"' in out
     assert cli.main(["cli", "spec", "--check", str(tmp_path / "missing.jsonl")]) == 1
 
 
@@ -239,3 +240,44 @@ def test_a_site_overlay_consumer_never_renders_a_site_value(capsys, overlay_cons
     from scrape_harness import pipeline
 
     assert pipeline.consumer().default_site == "overlay-only.invalid"  # the rest of the CLI still reads it
+
+
+def test_an_alias_is_listed_on_its_command_row_never_as_a_command_of_its_own(capsys, consumer_cmd):
+    got = rows(capsys)
+    cmds = {r["cmd"]: r for r in got if r["kind"] == "command"}
+    assert cmds["token-test"]["aliases"] == ["tok-a", "tok-b"]  # sorted
+    assert "tok-a" not in cmds and "tok-b" not in cmds
+    assert cmds["crawl-lists"]["aliases"] == []
+    assert all(r["aliases"] is None for r in got if r["kind"] != "command")
+    md = spec(capsys, "--format", "md")
+    assert "| `token-test` (aliases `tok-a`, `tok-b`) |" in md
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"required": True},
+        {"default": "x"},
+        {"choices": ["a"]},
+        {"aliases": None},
+        {"aliases": ["b", "a", "a"]},
+    ],
+    ids=["required", "default", "choices", "aliases-null", "aliases-dupe"],
+)
+def test_a_command_row_carries_no_argument_fields(capsys, change):
+    (row,) = [r for r in rows(capsys) if r["cmd"] == "crawl-lists" and r["kind"] == "command"]
+    contracts.validate("cli.v1", row)
+    with pytest.raises(contracts.ContractError):
+        contracts.validate("cli.v1", row | change)
+
+
+@pytest.mark.parametrize(
+    "kind,change",
+    [("option", {"opt": "subcategory"}), ("option", {"aliases": []}), ("positional", {"aliases": []})],
+    ids=["option-without-dash", "option-aliases", "positional-aliases"],
+)
+def test_an_argument_row_is_shaped_as_its_kind(capsys, kind, change):
+    row = next(r for r in rows(capsys) if r["kind"] == kind)
+    contracts.validate("cli.v1", row)
+    with pytest.raises(contracts.ContractError):
+        contracts.validate("cli.v1", row | change)

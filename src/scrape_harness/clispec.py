@@ -58,9 +58,12 @@ def _declared(pl: pipeline.Pipeline, name: str) -> dict | None:
     }
 
 
-def _row(kind: str, cmd: str, opt: str | None, a: argparse.Action | None, help_: str | None, declared):
+def _row(
+    kind: str, cmd: str, opt: str | None, a: argparse.Action | None, help_: str | None, declared, aliases=None
+):
     return {
         "kind": kind,
+        "aliases": aliases,
         "cmd": cmd,
         "opt": opt,
         "takes_value": bool(a is not None and a.nargs != 0),
@@ -77,13 +80,20 @@ def _walk(p: argparse.ArgumentParser, path: list[str], pl: pipeline.Pipeline, ou
     if sub is None:
         return
     helps = {ca.dest: ca.help for ca in sub._choices_actions}  # noqa: SLF001 (only parsers given help=)
+    # parser -> its first name, then its aliases (argparse's insertion order)
+    names: dict[int, list[str]] = {}
+    for name, child in sub.choices.items():
+        names.setdefault(id(child), []).append(name)
     seen: set[int] = set()
     for name, child in sub.choices.items():
-        if id(child) in seen:  # an alias points at a parser already walked under its first name
+        if id(child) in seen:  # an alias: listed on its target's row, never a command row of its own
             continue
         seen.add(id(child))
         cmd = " ".join([*path, name])
-        out.append(((cmd, 0, 0, ""), _row("command", cmd, None, None, helps.get(name), _declared(pl, cmd))))
+        aliases = sorted(names[id(child)][1:])
+        out.append(
+            ((cmd, 0, 0, ""), _row("command", cmd, None, None, helps.get(name), _declared(pl, cmd), aliases))
+        )
         for i, a in enumerate(child._actions):  # noqa: SLF001
             if isinstance(a, (argparse._HelpAction, argparse._SubParsersAction)):  # noqa: SLF001
                 continue
@@ -141,7 +151,10 @@ def markdown(rs: list[dict], prog: str) -> str:
         if r["kind"] == "command":
             d = r["declared"]
             role = f"{d['role']} {d['position']}" if d and d["position"] else (d["role"] if d else "")
-            lines.append(f"| `{r['cmd']}` | {role} | {d['network'] if d else ''} | {_cell(r['help'])} |")
+            name = f"`{r['cmd']}`" + (
+                " (aliases " + ", ".join(f"`{_cell(a)}`" for a in r["aliases"]) + ")" if r["aliases"] else ""
+            )
+            lines.append(f"| {name} | {role} | {d['network'] if d else ''} | {_cell(r['help'])} |")
     for cmd in sorted({r["cmd"] for r in rs if r["kind"] != "command"}):
         lines += ["", f"### `{cmd}`", "", "| Argument | Value | Default | Help |", "|---|---|---|---|"]
         for r in rs:

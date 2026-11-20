@@ -1,6 +1,7 @@
 {
   "kind": "command",
   "cmd": "crawl-lists",
+  "aliases": [],
   "opt": null,
   "takes_value": false,
   "required": false,

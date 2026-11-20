@@ -27,6 +27,9 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   `--json` prints one array; `--format md` prints a command reference.
   `--check FILE` exits 0 when FILE matches and 1 with a unified diff when it
   drifts. `<cli> validate cli.v1 FILE` checks the rows.
+  A command row lists its argparse aliases (`aliases`, sorted). An alias has
+  no row of its own. The schema refuses a command row with argument fields
+  (`required`, `default`, `choices`) and an option whose name lacks a `-`.
   A site-overlay consumer's `cli spec` reads its repo `pipeline.toml` only,
   never the site file. It works with no site file (the Nix sandbox), and a
   committed render holds no site value.

@@ -5,10 +5,16 @@
   "description": "One row of `<cli> cli spec`: a command, a positional or an option of the CLI's argparse tree (the core's commands and the consumer's [plugins].commands). Rows are sorted by cmd, then kind (command, positional, option), positionals in argument order and options by name, so the JSONL is deterministic. Generated, never data.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["kind", "cmd", "opt", "takes_value", "required", "default", "choices", "help", "declared"],
+  "required": ["kind", "cmd", "aliases", "opt", "takes_value", "required", "default", "choices", "help", "declared"],
   "properties": {
     "kind": { "enum": ["command", "positional", "option"] },
     "cmd": { "type": "string", "minLength": 1, "description": "The command path, space-joined, e.g. `crawl resume`." },
+    "aliases": {
+      "type": ["array", "null"],
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 },
+      "description": "On a command row: its argparse aliases (the last word of the path), sorted; [] for none. An alias has no row of its own. Null on an argument row."
+    },
     "opt": {
       "type": ["string", "null"],
       "minLength": 1,
@@ -42,8 +48,21 @@
   "allOf": [
     {
       "if": { "properties": { "kind": { "const": "command" } } },
-      "then": { "properties": { "opt": { "type": "null" }, "takes_value": { "const": false } } },
-      "else": { "properties": { "opt": { "type": "string" }, "declared": { "type": "null" } } }
+      "then": {
+        "properties": {
+          "aliases": { "type": "array" },
+          "opt": { "type": "null" },
+          "takes_value": { "const": false },
+          "required": { "const": false },
+          "default": { "type": "null" },
+          "choices": { "type": "null" }
+        }
+      },
+      "else": { "properties": { "aliases": { "type": "null" }, "opt": { "type": "string" }, "declared": { "type": "null" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "option" } } },
+      "then": { "properties": { "opt": { "pattern": "^-" } } }
     }
   ]
 }
