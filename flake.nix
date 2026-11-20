@@ -211,7 +211,7 @@
           # argument, so going through self.packages would be an infinite recursion
           cliPackage = li pkgs;
           cliSpecDoc = ./docs/cli.md;
-          pipeline = ./pipeline.toml; # the example's package embeds none
+          pipeline = "${src}/pipeline.toml"; # the example's package embeds none; the TREE copy, so its [plugins] paths resolve
         };
 
       # ssh-keygen / ssh-agent / ssh-add ONLY (approval signatures and their tests), never `ssh`: Nix's
@@ -634,7 +634,7 @@
               public = true;
               cliPackage = self.packages.${system}.default;
               cliSpecDoc = ./docs/cli.md;
-              pipeline = ./pipeline.toml;
+              pipeline = "${src}/pipeline.toml";
               extraCatalogue.SYNTHETIC_KEY = {
                 need = "optional";
                 secret = true;
