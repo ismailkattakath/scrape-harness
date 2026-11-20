@@ -486,16 +486,18 @@
               touch "$out"
             '';
 
-          # GOES RED WHEN: `nix run .#<cli>` (and .#preflight, .#cli-spec) loads the env differently from the
-          # dev shell's direnv chain: precedence ambient > .envrc.local > .env.development.local > .env.local >
-          # .env, .envrc.local evaluated after the dotenv files, root = the git toplevel (PRJ_ROOT) with the
-          # cwd and argv unchanged; or it runs outside a git checkout of THIS consumer, runs after an
-          # .envrc.local that exited, or prints a value. A stub CLI records what it got; synthetic values only.
+          # GOES RED WHEN: `nix run .#<cli>` (and .#preflight, .#cli-spec) loads the env other than declared:
+          # the files of the .envrc chain only (.env, .env.local, .envrc.local; never .env.development.local),
+          # a name .envrc.local sets or changes beats an ambient export, a dotenv name is set only when unset,
+          # .envrc.local is evaluated after the dotenv files, root = the git toplevel (PRJ_ROOT) with the cwd and
+          # argv unchanged; or it loads a checkout whose .envrc direnv does not allow (unallowed, edited since,
+          # or absent), runs outside a git checkout of THIS consumer, runs after an .envrc.local that exited,
+          # or prints a value. A stub CLI records what it got; synthetic values only.
           consumer-apps =
             let
               stub = pkgs.writeShellScriptBin consumer.cli ''
                 {
-                  for n in SYN_A SYN_B SYN_C SYN_D SYN_E SYN_F SYN_AMB; do printf '%s=%s\n' "$n" "''${!n:-}"; done
+                  for n in SYN_A SYN_B SYN_C SYN_D SYN_E SYN_F SYN_AMB SYN_AMB2; do printf '%s=%s\n' "$n" "''${!n:-}"; done
                   printf 'PWD=%s\nPRJ_ROOT=%s\n' "$PWD" "''${PRJ_ROOT:-}"
                   for a in "$@"; do printf 'ARG=%s\n' "$a"; done
                 } > "$REPORT"
@@ -506,53 +508,74 @@
               };
               app = n: tools.apps.${n}.program;
             in
-            pkgs.runCommandLocal "consumer-apps" { nativeBuildInputs = [ pkgs.git ]; } ''
-              export HOME="$TMPDIR"; cd "$TMPDIR"
-              export REPORT="$TMPDIR/report" SYN_AMB=ambient-wins
-              fail() { echo "consumer-apps: $*" >&2; [ -f "$REPORT" ] && cat "$REPORT" >&2; exit 1; }
-              want() { grep -qxF "$1" "$REPORT" || fail "the CLI did not get: $1"; }
-              git init -q repo; mkdir -p repo/sub/dir
-              printf '[consumer]\ncli = "${consumer.cli}"\n' > repo/pipeline.toml
-              printf 'SYN_A=from-env\nSYN_B=from-env\nSYN_C=from-env\nSYN_D=from-env\nSYN_F=from-env\nSYN_AMB=from-env\n' > repo/.env
-              printf '# a comment\nexport SYN_B="from-env-local"\nSYN_C=from-env-local\nSYN_D=from-env-local\n' > repo/.env.local
-              printf "SYN_C='from-env-dev-local'\nSYN_D=from-env-dev-local\n" > repo/.env.development.local
-              cat > repo/.envrc.local <<'EOF'
-              export SYN_D=from-envrc-local
-              export SYN_AMB=from-envrc-local
-              export SYN_E="$SYN_A-derived"
-              export SYN_F="''${SYN_F:-from-envrc-default}"
-              echo "from-envrc-stdout $SYN_D"
-              false
-              EOF
-              cd repo/sub/dir
-              ${app consumer.cli} one "two words" > out 2> err || fail "the app failed: $(cat err)"
-              for kv in SYN_A=from-env SYN_B=from-env-local SYN_C=from-env-dev-local SYN_D=from-envrc-local \
-                SYN_E=from-env-derived SYN_F=from-env SYN_AMB=ambient-wins \
-                "PWD=$TMPDIR/repo/sub/dir" "PRJ_ROOT=$TMPDIR/repo" "ARG=one" "ARG=two words"; do want "$kv"; done
-              [ "$(grep -c '^ARG=' "$REPORT")" = 2 ] || fail "argv changed"
-              if grep -q 'from-' out err; then fail "the loader printed a value"; fi
-              rm "$REPORT"; ${app "preflight"} refresh --json >/dev/null 2>&1 || fail "preflight failed"
-              want "ARG=preflight"; want "ARG=refresh"; [ "$(head -n 1 <(grep '^ARG=' "$REPORT"))" = ARG=preflight ] || fail "preflight argv"
-              rm "$REPORT"; ${app "cli-spec"} --format md >/dev/null 2>&1 || fail "cli-spec failed"
-              [ "$(grep '^ARG=' "$REPORT" | tr '\n' ' ')" = "ARG=cli ARG=spec ARG=--format ARG=md " ] || fail "cli-spec argv"
-              # refusals: exit 4 (the CLI's config refusal), and the CLI never runs
-              refused() { # $1 = what the message must say; the rest = the command
-                local msg="$1"; shift; rm -f "$REPORT"; rc=0; "$@" > out 2> err || rc=$?
-                [ "$rc" = 4 ] || fail "expected exit 4, got $rc: $msg"
-                grep -qF "$msg" err || fail "the refusal does not say: $msg ($(cat err))"
-                [ ! -f "$REPORT" ] || fail "the CLI ran after a refusal: $msg"
-                if grep -q 'from-' out err; then fail "a refusal printed a value"; fi
+            pkgs.runCommandLocal "consumer-apps"
+              {
+                nativeBuildInputs = [
+                  pkgs.git
+                  pkgs.direnv
+                ];
               }
-              cd "$TMPDIR"; mkdir nogit; cd nogit
-              refused "not inside a git checkout" ${app consumer.cli} --help
-              cd "$TMPDIR"; git init -q other; printf '[consumer]\ncli = "someother"\n' > other/pipeline.toml; cd other
-              refused "not a ${consumer.cli} checkout" ${app consumer.cli} --help
-              cd "$TMPDIR"; git init -q bare; cd bare
-              refused "not a ${consumer.cli} checkout" ${app consumer.cli} --help
-              cd "$TMPDIR/repo"; printf 'export SYN_X=from-x\nexit 3\n' > .envrc.local
-              refused ".envrc.local did not finish" ${app consumer.cli} --help
-              touch "$out"
-            '';
+              ''
+                export HOME="$TMPDIR" XDG_DATA_HOME="$TMPDIR/xdg-data" XDG_CONFIG_HOME="$TMPDIR/xdg-config"; cd "$TMPDIR"
+                export REPORT="$TMPDIR/report" SYN_AMB=ambient SYN_AMB2=ambient
+                fail() { echo "consumer-apps: $*" >&2; [ -f "$REPORT" ] && cat "$REPORT" >&2; exit 1; }
+                want() { grep -qxF "$1" "$REPORT" || fail "the CLI did not get: $1"; }
+                git init -q repo; mkdir -p repo/sub/dir
+                printf '[consumer]\ncli = "${consumer.cli}"\n' > repo/pipeline.toml
+                printf 'dotenv_if_exists .env\ndotenv_if_exists .env.local\nsource_env_if_exists .envrc.local\n' > repo/.envrc
+                printf 'SYN_A=from-env\nSYN_B=from-env\nSYN_C=from-env\nSYN_D=from-env\nSYN_F=from-env\nSYN_AMB=from-env\nSYN_AMB2=from-env\n' > repo/.env
+                printf '# a comment\nexport SYN_B="from-env-local"\nSYN_C=from-env-local\nSYN_D=from-env-local\n' > repo/.env.local
+                printf "SYN_C='from-env-dev-local'\nSYN_D=from-env-dev-local\n" > repo/.env.development.local
+                cat > repo/.envrc.local <<'EOF'
+                export SYN_D=from-envrc-local
+                export SYN_AMB=from-envrc-local
+                export SYN_E="$SYN_A-derived"
+                export SYN_F="''${SYN_F:-from-envrc-default}"
+                echo "from-envrc-stdout $SYN_D"
+                false
+                EOF
+                cd repo/sub/dir
+                # trust: only a checkout whose .envrc direnv allows has its files loaded
+                rc=0; ${app consumer.cli} one > out 2> err || rc=$?
+                [ "$rc" = 4 ] && grep -qF "direnv allow" err || fail "an unallowed checkout was loaded (exit $rc): $(cat err)"
+                [ ! -f "$REPORT" ] || fail "the CLI ran in an unallowed checkout"
+                direnv allow "$TMPDIR/repo" 2>/dev/null
+                ${app consumer.cli} one "two words" > out 2> err || fail "the app failed: $(cat err)"
+                for kv in SYN_A=from-env SYN_B=from-env-local SYN_C=from-env-local SYN_D=from-envrc-local \
+                  SYN_E=from-env-derived SYN_F=from-env SYN_AMB=from-envrc-local SYN_AMB2=ambient \
+                  "PWD=$TMPDIR/repo/sub/dir" "PRJ_ROOT=$TMPDIR/repo" "ARG=one" "ARG=two words"; do want "$kv"; done
+                [ "$(grep -c '^ARG=' "$REPORT")" = 2 ] || fail "argv changed"
+                if grep -q 'from-' out err; then fail "the loader printed a value"; fi
+                rm "$REPORT"; ${app "preflight"} refresh --json >/dev/null 2>&1 || fail "preflight failed"
+                want "ARG=preflight"; want "ARG=refresh"; [ "$(head -n 1 <(grep '^ARG=' "$REPORT"))" = ARG=preflight ] || fail "preflight argv"
+                rm "$REPORT"; ${app "cli-spec"} --format md >/dev/null 2>&1 || fail "cli-spec failed"
+                [ "$(grep '^ARG=' "$REPORT" | tr '\n' ' ')" = "ARG=cli ARG=spec ARG=--format ARG=md " ] || fail "cli-spec argv"
+                # refusals: exit 4 (the CLI's config refusal), and the CLI never runs
+                refused() { # $1 = what the message must say; the rest = the command
+                  local msg="$1"; shift; rm -f "$REPORT"; rc=0; "$@" > out 2> err || rc=$?
+                  [ "$rc" = 4 ] || fail "expected exit 4, got $rc: $msg"
+                  grep -qF "$msg" err || fail "the refusal does not say: $msg ($(cat err))"
+                  [ ! -f "$REPORT" ] || fail "the CLI ran after a refusal: $msg"
+                  if grep -q 'from-' out err; then fail "a refusal printed a value"; fi
+                }
+                cd "$TMPDIR"; mkdir nogit; cd nogit
+                refused "not inside a git checkout" ${app consumer.cli} --help
+                cd "$TMPDIR"; git init -q other; printf '[consumer]\ncli = "someother"\n' > other/pipeline.toml; cd other
+                refused "not a ${consumer.cli} checkout" ${app consumer.cli} --help
+                cd "$TMPDIR"; git init -q bare; cd bare
+                refused "not a ${consumer.cli} checkout" ${app consumer.cli} --help
+                cd "$TMPDIR/repo"; echo "# edited" >> .envrc
+                refused "direnv allow" ${app consumer.cli} --help
+                mv .envrc envrc.off; refused "direnv allow" ${app consumer.cli} --help; mv envrc.off .envrc
+                direnv allow "$TMPDIR/repo" 2>/dev/null
+                printf 'export SYN_X=from-x\nexit 3\n' > .envrc.local
+                refused ".envrc.local did not finish" ${app consumer.cli} --help
+                # a checkout with nothing to load needs no direnv allow
+                cd "$TMPDIR"; git init -q plain; printf '[consumer]\ncli = "${consumer.cli}"\n' > plain/pipeline.toml; cd plain
+                rm -f "$REPORT"; ${app consumer.cli} --help > out 2> err || fail "a checkout with no env files was refused: $(cat err)"
+                want "ARG=--help"
+                touch "$out"
+              '';
 
           # GOES RED WHEN: the leak gate's persona.allow handling is wrong: an allowed form must pass, while
           # the forbidden name alone, a line mixing it with an allowed form, and (unset) the allowed form

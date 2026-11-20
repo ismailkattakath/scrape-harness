@@ -5,7 +5,7 @@
 #   nix develop          → python + the harness, this project's CLI ([consumer].cli), ruff, gitleaks
 #   nix run              → the CLI;  nix run .#ship → THE push;  nix run .#env-doctor / .#leak-gate
 #   nix run .#<cli> -- … → the CLI with this checkout's .env* and .envrc.local loaded, from any shell
-#                          (also .#preflight, .#cli-spec)
+#                          (also .#preflight, .#cli-spec); only once `direnv allow` trusts the .envrc
 #   nix flake check      → the package build (runs pytest) + formatting
 {
   description = "a scrape-harness pipeline";

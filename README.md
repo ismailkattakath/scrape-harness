@@ -184,9 +184,13 @@ A consumer merges `apps`, `appPackages` and `checks` into its own outputs.
 
 `nix run .#<cli> -- refresh --dry-run` runs the CLI from any shell:
 
-- It loads `.env`, `.env.local`, `.env.development.local` and
-  `.envrc.local` from the checkout root, as the dev shell's `.envrc` does.
-- An exported name always wins. Each file sets only names still unset.
+- It loads `.env`, `.env.local` and `.envrc.local` from the checkout root,
+  the files the `.envrc` loads.
+- It loads them only when direnv allows the checkout's `.envrc`. A checkout
+  never allowed, edited since, or with no `.envrc` is refused (exit 4). Run
+  `direnv allow` once. A checkout with none of the files needs no allow.
+- A name that `.envrc.local` sets or changes beats an exported one, as in a
+  direnv shell. A dotenv file sets only names still unset.
 - `.envrc.local` is plain shell, sourced after the dotenv files. direnv's
   own functions are not there.
 - It refuses (exit 4) outside a git checkout of this consumer.

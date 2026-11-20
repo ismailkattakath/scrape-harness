@@ -94,14 +94,22 @@ let
     "${n}\t${e.need}\t${if e.secret or false then "secret" else "plain"}\t${e.note}"
   ) (lib.attrNames envCatalogueAll);
 
-  # `nix run .#<cli> -- ...` from ANY shell, with the env the dev shell's direnv chain gives (.envrc:
-  # .env, .env.local, .env.development.local, then .envrc.local, last wins). Per nix-dev-toolkit's
-  # loader, a name is set only when UNSET, so the files are read in reverse (first mention wins) and an
-  # ambient export always wins. .envrc.local is a SHELL file: it is sourced in a child after the dotenv
-  # files (so `export X="$X-..."` sees them, as under direnv), and only the names it leaves exported come back.
-  # The root is the git toplevel of the cwd, and it must be THIS consumer's checkout (pipeline.toml
-  # [consumer].cli); else exit 4, the CLI's own config refusal. The cwd and argv are unchanged, PRJ_ROOT
-  # is the root (as the shellHook sets it). Nothing here prints a value.
+  # `nix run .#<cli> -- ...` from ANY shell, with the files of the .envrc chain loaded: .env, .env.local, then
+  # .envrc.local (the harness's and the template's .envrc; .env.development.local is in neither, so not
+  # here). Precedence: a name .envrc.local SETS OR CHANGES > an ambient export > .env.local > .env.
+  #   - The dotenv files follow nix-dev-toolkit's loader: a name is set only when UNSET, so they are read in
+  #     reverse (first mention wins) and an ambient export wins. (direnv's own dotenv_if_exists overrides an
+  #     ambient value, measured with direnv 2.38.2; in a direnv shell the two agree, the files being loaded.)
+  #   - .envrc.local is the per-operator override (nix-dev-toolkit's envrc template: "highest precedence"),
+  #     a SHELL file sourced in a child after the dotenv files (so `export X="$X-..."` sees them, as under
+  #     direnv). The child prints its env before and after it; a name whose value it set or changed beats an
+  #     ambient export, as under direnv. Any other name comes back only when unset.
+  # Trust: the files are loaded only from a checkout whose .envrc direnv ALLOWS (`direnv status`, the same
+  # allow list a direnv shell obeys: never allowed, edited since, denied or absent refuse), so a foreign
+  # repo's .envrc.local never runs with the operator's environment. A checkout with none of the files needs
+  # no allow. The root is the git toplevel of the cwd, and it must be THIS consumer's checkout (pipeline.toml
+  # [consumer].cli). Every refusal is exit 4, the CLI's own config refusal. The cwd and argv are unchanged,
+  # PRJ_ROOT is the root (as the shellHook sets it). Nothing here prints a value.
   envLoader = ''
     refuse() { echo "${consumer.cli} (nix run): $*" >&2; exit 4; }
     root="$(git rev-parse --show-toplevel 2>/dev/null)" \
@@ -110,6 +118,16 @@ let
       "$root/pipeline.toml" 2>/dev/null || true)"
     [ "$got" = ${lib.escapeShellArg consumer.cli} ] \
       || refuse "not a ${consumer.cli} checkout (its pipeline.toml [consumer].cli differs or is absent)"
+    if [ -f "$root/.env" ] || [ -f "$root/.env.local" ] || [ -f "$root/.envrc.local" ]; then
+      # direnv's AllowStatus: 0 allowed, 1 not allowed (never, or edited since), 2 denied. foundRC is the
+      # NEAREST .envrc upward, so it must be this root's own.
+      allowed="$( (cd "$root" && direnv status --json 2>/dev/null) | python3 -I -c '
+    import json, os, sys
+    rc = (json.load(sys.stdin).get("state") or {}).get("foundRC") or {}
+    same = os.path.realpath(rc.get("path") or "/nonexistent") == os.path.realpath(sys.argv[1])
+    print(rc.get("allowed") if same else "")' "$root/.envrc" 2>/dev/null || true)"
+      [ "$allowed" = 0 ] || refuse "$root/.envrc is not allowed by direnv (never allowed, edited since, denied or absent), so its .env* and .envrc.local are not loaded; review it, then \`direnv allow $root\`"
+    fi
     export PRJ_ROOT="$root"
     _load_dotenv() {
       [ -f "$1" ] || return 0
@@ -126,29 +144,37 @@ let
         [ -n "''${!_key:-}" ] || export "$_key=$_val"
       done < "$1"
     }
-    # The child prints its environment as NAME=VALUE\0 records (`env -0`; non-interactive bash has no
-    # compgen), then an EMPTY record as the "finished" mark (an .envrc.local that `exit`s never reaches
-    # it). Its own stdout is discarded; never a value shown.
-    finished=0
+    # The child prints its environment twice as NAME=VALUE\0 records (`env -0`; non-interactive bash has
+    # no compgen), each followed by an EMPTY record: once before .envrc.local, once after. An .envrc.local
+    # that `exit`s never prints the second mark. Its own stdout is discarded; never a value shown.
+    declare -A _before=()
+    phase=0
     while IFS= read -r -d "" rec; do
-      if [ -z "$rec" ]; then finished=1; continue; fi
+      if [ -z "$rec" ]; then phase=$((phase + 1)); continue; fi
       k="''${rec%%=*}"
-      case "$k" in "" | *[!A-Za-z0-9_]*) continue ;; esac
-      [ -n "''${!k:-}" ] || export "$k=''${rec#*=}"
+      case "$k" in "" | *[!A-Za-z0-9_]* | PWD | OLDPWD | SHLVL | _) continue ;; esac
+      v="''${rec#*=}"
+      if [ "$phase" = 0 ]; then _before[$k]="$v"; continue; fi
+      if [ "''${_before[$k]+set}" != set ] || [ "''${_before[$k]}" != "$v" ]; then
+        export "$k=$v" # .envrc.local set or changed it: the per-operator override wins
+      else
+        [ -n "''${!k:-}" ] || export "$k=$v"
+      fi
     done < <(
       set +euo pipefail
-      _load_dotenv "$root/.env.development.local"
       _load_dotenv "$root/.env.local"
       _load_dotenv "$root/.env"
+      cd "$root" || exit 1
+      env -0
+      printf '\0'
       if [ -f "$root/.envrc.local" ]; then
-        cd "$root" || exit 1
         # shellcheck disable=SC1091
         . "$root/.envrc.local" >/dev/null </dev/null
       fi
       env -0
       printf '\0'
     )
-    [ "$finished" = 1 ] || refuse "$root/.envrc.local did not finish (it exited); nothing was run"
+    [ "$phase" = 2 ] || refuse "$root/.envrc.local did not finish (it exited); nothing was run"
   '';
   cliApp =
     name: argv:
@@ -158,6 +184,7 @@ let
         pkgs.git
         pkgs.python3
         pkgs.coreutils # env -0
+        pkgs.direnv # `direnv status`: is this checkout allowed
       ];
       text = envLoader + ''
         exec ${lib.getExe' cliPackage consumer.cli} ${lib.escapeShellArgs argv} "$@"

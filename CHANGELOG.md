@@ -68,10 +68,14 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
 - `consumerTools` takes `cliPackage` (the consumer's CLI package). With it,
   the flake gets `apps.<cli>`, `apps.preflight` and `apps.cli-spec`.
   `nix run .#<cli> -- ...` works from any shell, with no `nix develop -c`.
-  - The app loads the checkout's `.env`, `.env.local`,
-    `.env.development.local` and `.envrc.local`, as the dev shell's direnv
-    chain does. A name is set only when it is unset, so an exported value
-    always wins.
+  - The app loads the checkout's `.env`, `.env.local` and `.envrc.local`,
+    the files the `.envrc` loads.
+  - It loads them only when direnv allows the checkout's `.envrc`
+    (`direnv status`). A checkout never allowed, edited since, or with no
+    `.envrc` is refused with exit 4. So a foreign repo's `.envrc.local`
+    never runs with the operator's environment.
+  - A name that `.envrc.local` sets or changes beats an exported one, as in
+    a direnv shell. A dotenv file sets only names still unset.
   - `.envrc.local` is sourced as shell, after the dotenv files.
   - The app refuses with exit 4 outside a git checkout of this consumer
     (its `pipeline.toml` `[consumer].cli`), or when `.envrc.local` exits.
