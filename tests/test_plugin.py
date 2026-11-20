@@ -269,7 +269,9 @@ def test_the_consumers_allow_rules_are_merged(tmp_path):
 
 
 @pytest.mark.parametrize("where", ["state_env", "xdg", "home"])
-def test_the_plugins_session_status_reads_status_v1_where_and_as_the_harness_writes_it(where, tmp_path, monkeypatch):
+def test_the_plugins_session_status_reads_status_v1_where_and_as_the_harness_writes_it(
+    where, tmp_path, monkeypatch
+):
     """guard.py's SessionStart status line is a stdlib reader of STATE/status.json (no `status` CLI
     command exists, and a hook must not pay a `nix run`). This pins it to the harness: the same file as
     status.read_path() in every root case, and the status.v1 fields it names are read, not defaulted."""
@@ -291,7 +293,9 @@ def test_the_plugins_session_status_reads_status_v1_where_and_as_the_harness_wri
     elif where == "xdg":
         monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))
     assert g.status_file() == status.read_path()
-    st = contracts.validate("status.v1", json.loads((ROOT / "schemas" / "examples" / "status.example.json").read_text()))
+    st = contracts.validate(
+        "status.v1", json.loads((ROOT / "schemas" / "examples" / "status.example.json").read_text())
+    )
     status.read_path().parent.mkdir(parents=True)
     status.read_path().write_text(json.dumps(st))
     assert g.read_status() == status.read() == st
@@ -312,7 +316,9 @@ def test_the_plugins_route_clause_check_uses_the_harness_regex():
     if not src.is_file() or "TRIGGER = re.compile(" not in src.read_text():
         pytest.skip("the pinned plugin has no route-clause check (before 1.3.0)")
     tree = ast.parse(src.read_text())
-    (node,) = [n for n in tree.body if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "TRIGGER"]
+    (node,) = [
+        n for n in tree.body if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "TRIGGER"
+    ]
     call = node.value
     assert ast.literal_eval(call.args[0]) == claude_md.TRIGGER.pattern
     assert [ast.unparse(a) for a in call.args[1:]] == ["re.S"] and claude_md.TRIGGER.flags & re.S
