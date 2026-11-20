@@ -266,3 +266,53 @@ def test_the_consumers_allow_rules_are_merged(tmp_path):
     perms = claude_settings.render(pipeline.load(p))["permissions"]
     assert perms["allow"] == ["Bash(examplesite *)", "Bash(nix flake check*)"] and perms["deny"]
     assert "allow" not in claude_settings.render()["permissions"]  # the example declares none
+
+
+@pytest.mark.parametrize("where", ["state_env", "xdg", "home"])
+def test_the_plugins_session_status_reads_status_v1_where_and_as_the_harness_writes_it(where, tmp_path, monkeypatch):
+    """guard.py's SessionStart status line is a stdlib reader of STATE/status.json (no `status` CLI
+    command exists, and a hook must not pay a `nix run`). This pins it to the harness: the same file as
+    status.read_path() in every root case, and the status.v1 fields it names are read, not defaulted."""
+    import importlib.util
+
+    from scrape_harness import contracts, status
+
+    spec = importlib.util.spec_from_file_location("guard_status", PLUGIN / "hooks" / "guard.py")
+    g = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(g)
+    if not hasattr(g, "status_line"):
+        pytest.skip("the pinned plugin has no SessionStart status line (before 1.3.0)")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(ROOT))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("EXAMPLE_STATE", raising=False)
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+    if where == "state_env":
+        monkeypatch.setenv("EXAMPLE_STATE", str(tmp_path / "state"))
+    elif where == "xdg":
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))
+    assert g.status_file() == status.read_path()
+    st = contracts.validate("status.v1", json.loads((ROOT / "schemas" / "examples" / "status.example.json").read_text()))
+    status.read_path().parent.mkdir(parents=True)
+    status.read_path().write_text(json.dumps(st))
+    assert g.read_status() == status.read() == st
+    line = g.status_line()
+    sent = sum(st["requests"].values())
+    for fact in (st["run_id"], st["command"], f"stage {st['stage']}", st["status"], st["updated_at"]):
+        assert fact in line, fact
+    assert f"{sent} of {st['planned']} planned requests, {st['challenges']} challenge(s)" in line
+    assert "/DATA" not in line and str(tmp_path) not in line  # value-free: no path reaches the context
+
+
+def test_the_plugins_route_clause_check_uses_the_harness_regex():
+    """The plugin's own CI checks every description has a routable "Use when ..." clause (tests/test_guard.py,
+    plugin 1.3.0+). That check must cut the clause exactly as `<cli> claude-md` does: one regex, here."""
+    from scrape_harness import claude_md
+
+    src = PLUGIN / "tests" / "test_guard.py"
+    if not src.is_file() or "TRIGGER = re.compile(" not in src.read_text():
+        pytest.skip("the pinned plugin has no route-clause check (before 1.3.0)")
+    tree = ast.parse(src.read_text())
+    (node,) = [n for n in tree.body if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "TRIGGER"]
+    call = node.value
+    assert ast.literal_eval(call.args[0]) == claude_md.TRIGGER.pattern
+    assert [ast.unparse(a) for a in call.args[1:]] == ["re.S"] and claude_md.TRIGGER.flags & re.S
