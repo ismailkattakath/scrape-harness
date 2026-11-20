@@ -10,6 +10,7 @@ import time
 from conftest import EXAMPLES, PLUGIN, ROOT
 
 from scrape_harness import incidents
+from test_hooks import _li_on_path
 
 GUARD = PLUGIN / "hooks" / "guard.py"
 
@@ -20,6 +21,8 @@ def hook(gate, payload, tmp_path, timeout=30):
         "CLAUDE_PROJECT_DIR": str(ROOT),
         "SCRAPE_HARNESS_PIPELINE": str(ROOT / "pipeline.toml"),
         "EXAMPLE_STATE": str(tmp_path / "state"),
+        # the contract gates (plugin 1.3.0+) run `examplesite validate`; the nix sandbox has no CLI on PATH
+        **_li_on_path(tmp_path),
     }
     return subprocess.run(
         [sys.executable, "-I", str(GUARD), gate],

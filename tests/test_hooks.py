@@ -170,7 +170,7 @@ def test_write_blocks_forbidden_literal_without_echoing_it(tmp_path):
 def _li_on_path(tmp_path):
     """Put the installed `examplesite` (this interpreter's) on PATH for the subagent gate."""
     shim = tmp_path / "bin" / "examplesite"
-    shim.parent.mkdir()
+    shim.parent.mkdir(exist_ok=True)
     shim.write_text(f'#!/bin/sh\nexec {sys.executable} -m scrape_harness.cli "$@"\n')
     shim.chmod(0o755)
     return {"PATH": f"{shim.parent}:{os.environ['PATH']}"}
