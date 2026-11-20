@@ -1,0 +1,9 @@
+{
+  "schema": "diagnosis.v1",
+  "kind": "change",
+  "symptom": "the operator asked for the seller type on every listing",
+  "fix": { "change": "read the seller type in parse_ad, then reparse the saved snapshots offline", "files": ["examples/example_site/source.py", "tests/test_example_source.py"] },
+  "tests": ["test_the_seller_type_is_read"],
+  "confidence": "medium",
+  "blocked_on": null
+}

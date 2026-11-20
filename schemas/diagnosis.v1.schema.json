@@ -2,15 +2,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "diagnosis.v1.schema.json",
   "title": "diagnosis.v1",
-  "description": "The pipeline-engineer agent's final answer: what broke, why, the evidence quoted from files, and the proposed fix with its tests. A path is repo-relative, or DATA:/STATE: relative to that root; never absolute.",
+  "description": "The pipeline-engineer agent's final answer. A diagnosis (kind absent or \"diagnosis\"): what broke, why, the evidence quoted from files, and the proposed fix with its tests. A requested change (kind \"change\"): symptom is the request and fix the change; nothing broke, so root_cause and evidence are optional and never invented. A path is repo-relative, or DATA:/STATE: relative to that root; never absolute.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "symptom", "root_cause", "evidence", "fix", "tests", "confidence", "blocked_on"],
+  "required": ["schema", "symptom", "fix", "tests", "confidence", "blocked_on"],
   "properties": {
     "schema": { "const": "diagnosis.v1" },
-    "symptom": { "description": "What was observed (a run id and exit code, a missing field).", "type": "string", "minLength": 1 },
+    "kind": { "description": "diagnosis (the default): something broke. change: the operator asked for a change.", "enum": ["diagnosis", "change"] },
+    "symptom": { "description": "What was observed (a run id and exit code, a missing field), or the change requested.", "type": "string", "minLength": 1 },
     "root_cause": { "type": "string", "minLength": 1 },
-    "evidence": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/evidence" } },
+    "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } },
     "fix": {
       "description": "The proposed change and the files it touches; null only when blocked.",
       "oneOf": [
@@ -50,6 +51,12 @@
       }
     }
   },
-  "if": { "properties": { "blocked_on": { "const": null } } },
-  "then": { "properties": { "fix": { "type": "object" } } }
+  "allOf": [
+    { "if": { "properties": { "blocked_on": { "const": null } } }, "then": { "properties": { "fix": { "type": "object" } } } },
+    {
+      "description": "A diagnosis (no kind, or kind diagnosis) names its root cause and quotes at least one piece of evidence.",
+      "if": { "not": { "required": ["kind"], "properties": { "kind": { "const": "change" } } } },
+      "then": { "required": ["root_cause", "evidence"], "properties": { "evidence": { "minItems": 1 } } }
+    }
+  ]
 }

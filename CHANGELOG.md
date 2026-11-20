@@ -36,6 +36,9 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
     cause, evidence (file, optional line, a quote of at most 200 characters),
     the proposed fix and its files, test names, a confidence, and
     `blocked_on` (null or a closed list). A fix may be null only when blocked.
+    An optional `kind` is `diagnosis` (the default) or `change`. A change is
+    a request with nothing broken: `symptom` is the request, and `root_cause`
+    and `evidence` are optional, so the agent never has to invent them.
   - `<cli> validate run_report.v1 FILE` and `diagnosis.v1` check an answer.
 - `<cli> claude-md`: a route table for a consumer's CLAUDE.md, offline.
   - Rows say "when the user says / asks ... use ...". They come from the

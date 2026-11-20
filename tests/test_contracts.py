@@ -30,6 +30,7 @@ REF = EXAMPLE / "schemas" / "examples"
         ("preflight.v1", EXAMPLES / "preflight.example.json"),
         ("run_report.v1", EXAMPLES / "run_report.example.json"),
         ("diagnosis.v1", EXAMPLES / "diagnosis.example.json"),
+        ("diagnosis.v1", EXAMPLES / "diagnosis.change.example.json"),
         ("listing.v1", REF / "listing.example.json"),  # a consumer's schemas, via add_schema_dir
         ("observation.v1", REF / "observation.example.json"),
     ],
@@ -264,6 +265,45 @@ def test_a_diagnosis_validates(change):
 def test_a_malformed_diagnosis_fails(change):
     with pytest.raises(contracts.ContractError):
         contracts.validate("diagnosis.v1", _diagnosis(**change))
+
+
+def _change(**kw):
+    """A requested change (kind "change"): nothing broke, so no root cause and no evidence are invented."""
+    d = _diagnosis(kind="change", symptom="the operator asked for a seller-type field on listings")
+    del d["root_cause"], d["evidence"]
+    return d | kw
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {},
+        {"evidence": []},
+        {"evidence": [{"file": "examples/example_site/source.py", "quote": "def parse_ad"}]},
+        {"root_cause": "the selector was never written"},
+        {"blocked_on": "operator_decision", "fix": None, "confidence": "low"},
+    ],
+)
+def test_a_requested_change_validates_without_a_root_cause_or_evidence(change):
+    contracts.validate("diagnosis.v1", _change(**change))
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda: _change(kind="diagnosis"),  # a diagnosis still needs its root cause and evidence
+        lambda: {k: v for k, v in _diagnosis().items() if k != "root_cause"},  # no kind = diagnosis
+        lambda: {k: v for k, v in _diagnosis().items() if k != "evidence"},
+        lambda: _diagnosis(kind="diagnosis", evidence=[]),
+        lambda: _change(fix=None),  # not blocked: the change is named
+        lambda: _change(kind="request"),  # closed enum
+        lambda: _change(evidence=[{"file": "/abs.py", "quote": "x"}]),
+        lambda: _change(root_cause=""),
+    ],
+)
+def test_a_malformed_change_or_kind_fails(build):
+    with pytest.raises(contracts.ContractError):
+        contracts.validate("diagnosis.v1", build())
 
 
 @pytest.mark.parametrize("name", ["run_report", "diagnosis"])
