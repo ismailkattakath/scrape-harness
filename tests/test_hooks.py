@@ -197,6 +197,51 @@ def test_subagent_output_gate(tmp_path):
     assert retry.returncode == 0  # one retry only; `examplesite findings append` is the final gate
 
 
+def test_validate_says_unknown_contract_distinctly(tmp_path):
+    """The plugin's version-skew rule rests on this: an unknown contract name exits 1 with
+    `unknown contract '<name>'` on stderr, while an invalid object exits EXIT_CONTRACT (2)."""
+    shim = _li_on_path(tmp_path)["PATH"].split(":", 1)[0] + "/examplesite"
+    unknown = subprocess.run(
+        [shim, "validate", "no_such.v9", "-"], input="{}", capture_output=True, text=True
+    )
+    assert unknown.returncode == 1 and "unknown contract 'no_such.v9'" in unknown.stderr
+    invalid = subprocess.run(
+        [shim, "validate", "run_report.v1", "-"], input="{}", capture_output=True, text=True
+    )
+    assert invalid.returncode == 2 and "unknown contract" not in invalid.stderr
+
+
+def _plugin_at_least(version):
+    have = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())["version"]
+    return tuple(map(int, have.split("."))) >= version
+
+
+@pytest.mark.skipif(
+    not _plugin_at_least((1, 3, 0)), reason="the pinned plugin predates the agent contracts (1.3.0)"
+)
+@pytest.mark.parametrize(
+    ("gate", "agent", "contract"),
+    [("steward", "run-steward", "run_report.v1"), ("engineer", "pipeline-engineer", "diagnosis.v1")],
+)
+def test_agent_contract_gates_against_the_real_cli(tmp_path, gate, agent, contract):
+    env = {**_li_on_path(tmp_path), "EXAMPLE_STATE": str(tmp_path / "state")}
+    stem = contract.split(".")[0]
+    ev = {
+        "hook_event_name": "SubagentStop",
+        "agent_type": f"scrape-harness:{agent}",
+        "stop_hook_active": False,
+    }
+    good = (EXAMPLES / f"{stem}.example.json").read_text()
+    assert run(gate, ev | {"last_assistant_message": good}, env=env).returncode == 0
+    for bad in sorted((EXAMPLES / "invalid").glob(f"{stem}.*.json")) + ["the run went fine"]:
+        msg = bad if isinstance(bad, str) else bad.read_text()
+        r = run(gate, ev | {"last_assistant_message": msg}, env=env)
+        assert r.returncode == 2 and contract in r.stderr, bad
+    assert (
+        run(gate, ev | {"stop_hook_active": True, "last_assistant_message": "prose"}, env=env).returncode == 0
+    )
+
+
 def test_write_blocks_the_state_root(tmp_path):
     state = tmp_path / "state"
     r = write(state / "approvals" / "ledger.jsonl", env={"EXAMPLE_STATE": str(state)})

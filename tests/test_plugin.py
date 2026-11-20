@@ -45,14 +45,16 @@ def test_hook_commands_point_at_real_executables_and_agents():
         for g in groups:
             for h in g["hooks"]:
                 m = re.fullmatch(
-                    r'"\$\{CLAUDE_PLUGIN_ROOT\}"/(\S+) (bash|write|subagent|session|steward|teammate|precompact)',
+                    r'"\$\{CLAUDE_PLUGIN_ROOT\}"/(\S+) (bash|write|subagent|engineer|session|steward|teammate|precompact)',
                     h["command"],
                 )
                 assert m, h["command"]
                 script = PLUGIN / m.group(1)
                 assert script.is_file() and os.access(script, os.X_OK), script
                 gates.append(m.group(2))
-    assert sorted(gates) == ["bash", "precompact", "session", "steward", "subagent", "teammate", "write"]
+    base = ["bash", "precompact", "session", "steward", "subagent", "teammate", "write"]
+    # plugin 1.3.0 adds the pipeline-engineer's diagnosis.v1 gate; earlier pins have none
+    assert sorted(gates) in (base, sorted([*base, "engineer"]))
     for sub in doc["hooks"]["SubagentStop"]:
         agent = re.fullmatch(r"\^scrape-harness:([a-z-]+)\$", sub["matcher"]).group(1)
         assert (PLUGIN / "agents" / f"{agent}.md").is_file()

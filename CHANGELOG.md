@@ -20,6 +20,12 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
 
 ### Added
 
+- Hook tests for the plugin's agent-contract gates (plugin 1.3.0), against
+  the real CLI: the run-steward's and pipeline-engineer's answers pass when
+  valid and block when invalid. They skip while the pinned plugin is older.
+  A test pins the skew signal the plugin reads: an unknown contract name
+  exits 1 with `unknown contract '<name>'`; an invalid object exits 2. The
+  steward and gate-list tests now pass against both plugin pins.
 - Two agent-answer contracts, strict (no unknown key):
   - `run_report.v1` is the run-steward's final answer: the run ids, a state
     (running, finished, stopped or refused), the exit code and stop reason,

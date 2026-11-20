@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 
-from conftest import PLUGIN, ROOT
+from conftest import EXAMPLES, PLUGIN, ROOT
 
 from scrape_harness import incidents
 
@@ -36,6 +36,8 @@ def test_the_steward_is_kept_working_until_every_incident_is_acked(data_dir, tmp
         "hook_event_name": "SubagentStop",
         "agent_type": "scrape-harness:run-steward",
         "stop_hook_active": False,
+        # a valid run_report.v1: plugin 1.3.0+ also checks the steward's answer (earlier pins ignore it)
+        "last_assistant_message": (EXAMPLES / "run_report.example.json").read_text(),
     }
     assert hook("steward", ev, tmp_path).returncode == 0  # nothing open: it may stop
     inc = incidents.open_incident(5, "STOPPED: http_403 at x", "run-1", "fetch-ads")
