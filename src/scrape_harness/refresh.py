@@ -147,6 +147,17 @@ def unfinished() -> dict | None:
     return left[-1] if left else None
 
 
+def steps_to_run(pl: pipeline.Pipeline, st: dict | None) -> list[str]:
+    """The step names a refresh will still run: the whole declared chain for a new plan, only the steps not
+    yet done for a resume (`st`). A run whose recorded steps no longer line up with the declared ones gets the
+    whole chain (its bounds check refuses it later anyway)."""
+    names = [s.name for s in pl.refresh]
+    recorded = (st or {}).get("steps") or []
+    if not st or [s.get("name") for s in recorded] != names:
+        return names
+    return [n for n, s in zip(names, recorded, strict=True) if s.get("status") != "done"]
+
+
 def _now() -> str:
     return datetime.now(UTC).strftime(approvals.FMT)
 
@@ -761,8 +772,9 @@ def _cmd(args: argparse.Namespace, stack: contextlib.ExitStack) -> int:
     from . import crawl, preflight
 
     # Before a plan is saved, an approval claimed or spent, or a step run: a declared secret env var that is
-    # unset would stop the chain AFTER the operator's Touch ID (it has). Names only, never values.
-    if gaps := preflight.secret_gaps([s.name for s in pl.refresh]):
+    # unset would stop the chain AFTER the operator's Touch ID (it has). Names only, never values. A resume
+    # needs only the secrets of the steps it still runs.
+    if gaps := preflight.secret_gaps(steps_to_run(pl, st)):
         print(f"refusing: {', '.join(gaps)} {'is' if len(gaps) == 1 else 'are'} not set (needed by a refresh "
               f"step's secrets_env); nothing was planned, claimed or sent. See `{cli_name} preflight refresh`.",
               file=sys.stderr)  # fmt: skip

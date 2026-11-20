@@ -28,7 +28,7 @@ Absent means the command needs none.
 
 | Run | Checks |
 |---|---|
-| `<cli> preflight refresh` | every `[crawl.refresh]` step |
+| `<cli> preflight refresh` | every `[crawl.refresh]` step; for an unfinished run, only the steps it still runs |
 | `<cli> preflight fetch-ads --max-fetches 5` | that one command, its args parsed by the real parser |
 | `... --json` | one `preflight.v1` object instead of the table |
 | `... --egress` | also the egress country (see below) |
@@ -71,4 +71,5 @@ skipped: the plan picks one, and the run checks that one at its start.
 unset, it exits 2 and names it. Nothing is planned, claimed, spent or sent,
 so the approval stays live for the next try. `refresh --dry-run` prints the
 same warning and goes on, like the breaker-latch warning. `refresh --abandon`
-needs no secret.
+needs no secret. A resume checks only the steps it still runs: a secret
+that only a finished step needed is not asked for again.

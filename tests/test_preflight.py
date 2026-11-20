@@ -12,6 +12,8 @@ Every secret in these tests is a synthetic marker; a test asserts the marker nev
 from __future__ import annotations
 
 import json
+import os
+import pathlib
 
 import pytest
 from conftest import FIXTURES
@@ -286,3 +288,27 @@ def test_abandon_needs_no_secret(chain, capsys, monkeypatch):
     monkeypatch.delenv(GEO)
     with pytest.raises(SystemExit, match="no unfinished refresh run"):
         main(["refresh", "--abandon"])
+
+
+def test_a_resume_needs_only_the_secrets_of_its_unfinished_steps(chain, data_dir, capsys, monkeypatch):
+    """geocode (GEO) finished; export-db (DB only here) failed. The resume runs only export-db, so a GEO that
+    is no longer injected must not refuse it, and `preflight refresh` (which the refusal points to) agrees."""
+    p = pathlib.Path(os.environ[pipeline.ENV])  # before any load: current() caches by path
+    p.write_text(p.read_text().replace(f'secrets_env = ["{DB}", "{GEO}"]', f'secrets_env = ["{DB}"]'))
+    from test_refresh import approved, names
+
+    approved(capsys)
+    monkeypatch.setenv("TEST_EXPORT_FAIL", "1")
+    assert main(["refresh", "--approve-network"]) == 1
+    (st,) = refresh.states()
+    assert [s["status"] for s in st["steps"]][-2:] == ["done", "failed"]
+    monkeypatch.delenv(GEO)
+    code, d = doc(capsys, "refresh")
+    assert code == 0 and GEO not in {r["name"] for r in d["checks"]}, d
+    chain.clear()
+    capsys.readouterr()
+    assert main(["refresh", "--approve-network"]) == 0, capsys.readouterr().err
+    assert names(chain) == ["export-db"]
+    monkeypatch.delenv(DB)  # a NEW plan (nothing unfinished) still checks the whole chain
+    assert main(["refresh"]) == 2
+    assert GEO in capsys.readouterr().err

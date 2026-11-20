@@ -144,7 +144,13 @@ def check(name: str, args: list[str] | None = None, egress: bool = False) -> dic
     if name == "refresh":
         if not pl.refresh:
             raise SystemExit(f"{pl.path} declares no [crawl.refresh] steps; there is nothing to preflight")
-        names = [s.name for s in pl.refresh]
+        from . import refresh
+
+        try:  # a resume: only the secrets of its unfinished steps, as `refresh` checks them
+            st = refresh.unfinished()
+        except store.DataDirError:  # no roots: the data_root row below names it
+            st = None
+        names = refresh.steps_to_run(pl, st)
         sites = sorted(
             {_site_of(s.name, list(s.args)) for s in pl.refresh if pl.command(s.name).network == "site"}
         )

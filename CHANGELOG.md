@@ -58,7 +58,10 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
 - `refresh` checks its steps' `secrets_env` first. When one is unset or
   empty, it refuses with exit 2 and names it. Nothing is planned, claimed,
   spent or sent. `refresh --dry-run` prints the same warning and goes on.
-  A refresh that declares no `secrets_env` behaves as before.
+  A refresh that declares no `secrets_env` behaves as before. A resume
+  checks only the steps it still runs, and so does `preflight refresh`
+  while a run is unfinished. A secret that only a finished step needed is
+  not asked for again.
 - `consumerTools` takes `cliPackage` (the consumer's CLI package). With it,
   the flake gets `apps.<cli>`, `apps.preflight` and `apps.cli-spec`.
   `nix run .#<cli> -- ...` works from any shell, with no `nix develop -c`.
