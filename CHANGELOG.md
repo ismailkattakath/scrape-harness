@@ -10,6 +10,14 @@ The version is the one in `pyproject.toml`.
 
 Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
 
+### Changed
+
+- The plugin pin moves to kattakath/skills caff9ac (plugin 1.3.0). The run-steward and
+  pipeline-engineer answers are now checked as run_report.v1 and diagnosis.v1, SessionStart adds a
+  short status line, and the runbook triggers use the operator's words. The example's CLAUDE.md
+  route block is regenerated for the new descriptions. If the validator cannot run, a contract
+  gate blocks once and then lets the agent stop, so a missing CLI never traps an agent.
+
 ### Fixed
 
 - A list walk (`--mode walk|frontier`) writes one observation per ad. A card a

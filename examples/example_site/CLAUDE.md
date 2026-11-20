@@ -15,11 +15,11 @@ consumer's own.
 | when a hypothesis in the findings register needs (re)testing against a computed summary | agent `scrape-harness:analyst` |  |
 | when a run stops, a field goes missing, or the operator asks for a pipeline change | agent `scrape-harness:pipeline-engineer` |  |
 | when a crawl-lists / fetch-ads / ab run is started and someone must keep an eye on it | agent `scrape-harness:run-steward` |  |
-| before any crawl-lists / fetch-ads / ab / crawl resume that is not offline, and when a run refused with exit 10 | skill `scrape-harness:runbook-approve` |  |
-| when parsed listings miss a field, a parser changed, or someone proposes re-crawling to pick up new data | skill `scrape-harness:runbook-reparse` |  |
-| when a run's status is "stopped" and the cause is gone | skill `scrape-harness:runbook-resume` |  |
-| whenever a crawl-lists / fetch-ads / ab / crawl resume run exits non-zero, or the run card / live log shows STOPPED | skill `scrape-harness:runbook-stop` |  |
-| when the operator asks to add a site or start a new consumer | skill `scrape-harness:site-recon` |  |
+| when the operator says "approve it" or "I'll do the Touch ID", asks "which tunnel" or says "use the <city> tunnel" or "use another tunnel", before any crawl-lists / fetch-ads / ab / refresh / crawl resume that is not offline, and when a run refused with exit 10 | skill `scrape-harness:runbook-approve` |  |
+| when the operator says "re-parse without new views" or "re-extract it", when parsed listings miss a field, a parser changed, or someone proposes re-crawling to pick up new data | skill `scrape-harness:runbook-reparse` |  |
+| when the operator says "resume", "pick it up again" or "continue the run" and the run's status is "stopped" with its cause gone | skill `scrape-harness:runbook-resume` |  |
+| when the operator says "the refresh failed", "it stopped" or "why did it stop", whenever a crawl-lists / fetch-ads / ab / refresh / crawl resume run exits non-zero, or the run card / live log shows STOPPED | skill `scrape-harness:runbook-stop` |  |
+| when the operator asks to add a site, says "look at this site first" or "start a new consumer", or a new source is proposed before anything about its pages is known | skill `scrape-harness:site-recon` |  |
 | read list pages -> observations.jsonl (depth-stratified) | `examplesite crawl-lists` (stage 1/3) | site |
 | GET ad pages the refetch rule selects -> listings.jsonl | `examplesite fetch-ads` (stage 2/3) | site |
 | re-extract listings from saved ad snapshots, OFFLINE (no new views) | `examplesite reparse` (stage 3/3) | none |
