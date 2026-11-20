@@ -31,8 +31,9 @@ Migration step 5): without the site's end marker a walk can never reach a positi
 refuses it (exit 2) before any plan is saved or signed.
 
 `--proxy-only TEXT` and `--proxy-exclude TEXT` (repeatable) choose which configured [crawl.proxy] url a NEW
-plan picks, as crawl-lists' and `probe robots`' do: --proxy-only keeps the one url containing TEXT (exactly one,
-or refuse), --proxy-exclude never keeps a url containing TEXT; nothing left refuses, before any plan is saved.
+plan picks, by the substring test of `probe robots` and crawl-lists: --proxy-only keeps the one url containing
+TEXT (exactly one, or refuse), --proxy-exclude never keeps a url containing TEXT. Stricter than those: both
+apply together, and they are checked with one url configured too; nothing left refuses, before any plan is saved.
 The bounds sign the chosen url as before, never the flags, so a plan without them hashes as it did. A live
 approval of an excluded proxy is not used. A resume keeps its signed proxy whatever the flags say.
 
@@ -349,9 +350,9 @@ def allowed_proxies(
     proxies: tuple[str, ...], only: str | None = None, exclude: list[str] | tuple[str, ...] | None = ()
 ) -> tuple[str, ...] | None:
     """The configured urls a NEW plan may pick under --proxy-only / --proxy-exclude, or None when neither is set
-    (the pick is then exactly as before). The same rules as crawl-lists and `probe robots`: --proxy-only keeps
-    the ONE url containing TEXT, --proxy-exclude drops every url containing any TEXT. Refuses when they leave
-    no url, or --proxy-only matches not exactly one."""
+    (the pick is then exactly as before). --proxy-only keeps the ONE url containing TEXT, --proxy-exclude drops
+    every url containing any TEXT; both apply together, whatever the number configured. Refuses when they
+    leave no url, or --proxy-only matches not exactly one."""
     exclude = tuple(exclude or ())
     if not only and not exclude:
         return None

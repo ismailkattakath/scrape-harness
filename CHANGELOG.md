@@ -39,8 +39,9 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   also checks the approval signers file, the DATA root, and the site's
   cooldown and breaker latch. `preflight refresh` checks every refresh step.
 - `<cli> refresh --proxy-only TEXT` and `--proxy-exclude TEXT` (repeatable):
-  which `[crawl.proxy]` url a new refresh plan picks, with the same rules as
-  `crawl-lists` and `probe robots`. The bounds sign the chosen url as
+  which `[crawl.proxy]` url a new refresh plan picks, by the same substring
+  test as `probe robots` and `crawl-lists`. Both flags apply together, and
+  they are checked with one url configured too. The bounds sign the chosen url as
   before, never the flags, so a plan without them hashes as it did (pinned
   by a literal-hash test). `refresh` refuses, before any plan is saved, when
   the flags leave no url or `--proxy-only` does not match exactly one. A live

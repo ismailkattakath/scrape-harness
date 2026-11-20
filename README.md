@@ -135,7 +135,10 @@ approval. It is a **strict chain**: a failed step stops every step after it.
 - **Which proxy.** With several `[crawl.proxy]` urls, a new plan picks one
   and signs it. `--proxy-only TEXT` makes it pick the one url containing
   TEXT. `--proxy-exclude TEXT` (repeatable) never picks a url containing
-  TEXT. Both work as they do on `crawl-lists` and `probe robots`.
+  TEXT. The matching is the same substring test as `probe robots`
+  (`--proxy-only`) and `crawl-lists` (`--proxy-exclude`). refresh is
+  stricter: it applies both flags together, and it checks them with one
+  url configured too.
   - `refresh` refuses, before any plan is saved, when the flags leave no url
     or `--proxy-only` matches more or less than one.
   - The bounds sign the chosen url, not the flags. A plan without them

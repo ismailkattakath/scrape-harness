@@ -49,6 +49,7 @@ Absent means the command needs none.
 The egress check goes through the one configured `[crawl.proxy]` url, as a
 run's own check does, or direct when none is set. With several urls it is
 skipped: the plan picks one, and the run checks that one at its start.
+`refresh --proxy-only TEXT` or `--proxy-exclude TEXT` decides that pick.
 
 - A secret is reported by NAME, as `present` or `missing`. Its value and its
   length are never printed. A test checks this with a marker value.
