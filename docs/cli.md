@@ -15,6 +15,7 @@ Handled before parsing, so not in the tables: `examplesite plan <command> ...` (
 | `breaker` |  |  | the gone-storm breaker's site latch: status, or an audited operator clear (appends) |
 | `browser` |  |  | the dedicated browser profile |
 | `browser open` | utility | site | open the dedicated profile HEADED to clear a challenge or gate once |
+| `claude-md` |  |  | the route table (plugin skills and agents, declared commands) between the scrape-harness markers in CLAUDE.md; offline, repo-only |
 | `claude-settings` |  |  | render/check .claude/settings.json from pipeline.toml |
 | `cli` |  |  | this CLI described: the command and flag tree (offline) |
 | `cli spec` |  |  | every command, positional and option (consumer plug-ins included) as cli.v1 JSONL, sorted, with its pipeline.toml declaration (stage/utility, network class, inputs, outputs) |
@@ -86,6 +87,15 @@ Handled before parsing, so not in the tables: `examplesite plan <command> ...` (
 | Argument | Value | Default | Help |
 |---|---|---|---|
 | `--source` | value | `example.invalid` |  |
+
+### `claude-md`
+
+| Argument | Value | Default | Help |
+|---|---|---|---|
+| `--check` | flag |  | exit 0 in sync, 1 drift (a unified diff), 4 refused |
+| `--file` | value |  | the CLAUDE.md (default: the one beside pipeline.toml) |
+| `--plugin` | value |  | the plugin (default: $SCRAPE_HARNESS_PLUGIN, the pinned one) |
+| `--write` | flag |  | rewrite only the block between the markers |
 
 ### `claude-settings`
 

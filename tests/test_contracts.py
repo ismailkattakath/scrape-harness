@@ -178,9 +178,20 @@ def _diagnosis(**kw):
     "change",
     [
         {"state": "running", "exit_code": None, "stop_reason": None, "next_action": "none"},
-        {"state": "finished", "exit_code": 0, "stop_reason": None, "next_action": "none", "open_incidents": []},
+        {
+            "state": "finished",
+            "exit_code": 0,
+            "stop_reason": None,
+            "next_action": "none",
+            "open_incidents": [],
+        },
         {"state": "finished", "exit_code": None, "stop_reason": None, "next_action": "none"},
-        {"state": "refused", "exit_code": 10, "stop_reason": "no approval for this plan", "next_action": "approve"},
+        {
+            "state": "refused",
+            "exit_code": 10,
+            "stop_reason": "no approval for this plan",
+            "next_action": "approve",
+        },
         {"state": "stopped", "exit_code": 6, "stop_reason": "cooldown", "next_action": "wait_cooldown"},
         {"evidence": ["STATE:status.json", "DATA:events.jsonl"]},
         {"run_ids": ["a-run", "another-run"]},

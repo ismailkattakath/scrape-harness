@@ -31,6 +31,25 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
     the proposed fix and its files, test names, a confidence, and
     `blocked_on` (null or a closed list). A fix may be null only when blocked.
   - `<cli> validate run_report.v1 FILE` and `diagnosis.v1` check an answer.
+- `<cli> claude-md`: a route table for a consumer's CLAUDE.md, offline.
+  - Rows say "when the user says / asks ... use ...". They come from the
+    pinned plugin's skills and agents (the "Use when / whenever / before"
+    clause of each description) and from each command `pipeline.toml`
+    declares (its help, stage and network class).
+  - A rule line lists the networked commands that take `--plan`: plan, then
+    `approve`, then `--approve-network`.
+  - The render is repo-only, like `cli spec`: no site file value enters it.
+    Rows are sorted and pipes escaped, so it is byte-identical everywhere.
+  - `--write` rewrites only the lines between
+    `<!-- scrape-harness:routes:start -->` and
+    `<!-- scrape-harness:routes:end -->`. A second `--write` changes nothing.
+  - `--check` exits 0 in sync and 1 on drift, with a unified diff.
+  - Both refuse (exit 4) and write nothing when the file is absent, or a
+    marker is missing, repeated, not on a line of its own, or out of order.
+  - The plugin is `$SCRAPE_HARNESS_PLUGIN` (or `--plugin DIR`), with no
+    fallback. A description with no "Use ..." clause refuses.
+  - `examples/example_site/CLAUDE.md` is the example's block. Regenerate it
+    when the plugin pin moves.
 - `<cli> cli spec`: the whole command tree as JSONL, one `cli.v1` row per
   command, positional and option. Consumer plug-in commands are included. A
   command row carries its `pipeline.toml` entry: stage or utility, network

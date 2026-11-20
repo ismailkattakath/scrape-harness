@@ -1887,6 +1887,13 @@ def cmd_claude_settings(args: argparse.Namespace) -> int:
     return 0 if ok else EXIT_CONFIG
 
 
+def cmd_claude_md(args: argparse.Namespace) -> int:
+    """The CLAUDE.md route block (claude_md.py): print it, --write it between the markers, or --check it."""
+    from . import claude_md
+
+    return claude_md.cmd(args)
+
+
 APPROVE_NETWORK_HELP = "the operator approved THIS networked run"
 
 
@@ -2238,6 +2245,21 @@ def parser() -> argparse.ArgumentParser:
     cs = sub.add_parser("claude-settings", help="render/check .claude/settings.json from pipeline.toml")
     cs.add_argument("--write", action="store_true", help="write it (default: check, exit 4 on drift)")
     cs.set_defaults(fn=cmd_claude_settings)
+    cm = sub.add_parser(
+        "claude-md",
+        help="the route table (plugin skills and agents, declared commands) between the scrape-harness "
+        "markers in CLAUDE.md; offline, repo-only",
+    )
+    cmx = cm.add_mutually_exclusive_group()
+    cmx.add_argument("--write", action="store_true", help="rewrite only the block between the markers")
+    cmx.add_argument(
+        "--check", action="store_true", help="exit 0 in sync, 1 drift (a unified diff), 4 refused"
+    )
+    cm.add_argument("--file", metavar="PATH", help="the CLAUDE.md (default: the one beside pipeline.toml)")
+    cm.add_argument(
+        "--plugin", metavar="DIR", help="the plugin (default: $SCRAPE_HARNESS_PLUGIN, the pinned one)"
+    )
+    cm.set_defaults(fn=cmd_claude_md)
 
     v = sub.add_parser("validate", help="validate JSON/JSONL against a named contract")
     v.add_argument("contract", help="e.g. listing.v1, observation.v1, finding.v1")
@@ -2289,7 +2311,8 @@ def main(argv: list[str] | None = None) -> int:
         return tasks.run(rest[: rest.index("--")] if "--" in rest else rest, extra)
     if argv[:1] == ["plan"]:  # `<cli> plan <command> <args>` == `<cli> <command> <args> --plan`
         argv = [*argv[1:], "--plan"]
-    if argv[:2] == ["cli", "spec"]:  # a committed render: the repo's pipeline, never a site file's values
+    # a committed render: the repo's pipeline, never a site file's values
+    if argv[:2] == ["cli", "spec"] or argv[:1] == ["claude-md"]:
         with pipeline.repo_only():
             return _main(argv)
     return _main(argv)
