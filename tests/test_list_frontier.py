@@ -354,3 +354,60 @@ def test_refresh_postcondition_passes_an_anchored_frontier(monkeypatch):
            "list": {"mode": "frontier", "status": "anchored", "observations_written": 12}}  # fmt: skip
     monkeypatch.setattr(refresh, "_run_doc", lambda objs: doc)
     assert refresh.list_postcondition("R", [{"run_id": "c1"}]) is None
+
+
+# ── what a walk signs beyond its arguments: the list order and the policy digest ─────────────────────────
+def test_a_frontier_plan_signs_the_sources_order(networked, capsys, monkeypatch):  # noqa: F811
+    """Early stop depends on Source.order, read from the plug-in at run start: a plug-in edit after the approval
+    (unordered -> bump_desc) must be another plan, never the same hash."""
+    got = plan_hash(capsys, [*BASE, "--mode", "frontier"])
+    assert approvals.load_plan(got)["order"] == "unordered"
+    monkeypatch.setattr(ExampleSite, "order", "bump_desc", raising=False)
+    assert plan_hash(capsys, [*BASE, "--mode", "frontier"]) != got
+    # only a frontier signs it: a census and a plan without --mode hash as before
+    assert "order" not in approvals.load_plan(plan_hash(capsys, [*BASE, "--mode", "walk"]))
+    assert "order" not in approvals.load_plan(plan_hash(capsys, BASE))
+
+
+def test_a_refresh_frontier_step_signs_the_order(tmp_path, monkeypatch, data_dir, operator_key, marker):  # noqa: F811
+    from test_refresh import make_pipeline
+
+    p = make_pipeline(tmp_path, monkeypatch, operator_key["fp"], steps=("crawl-lists",))
+    p.write_text(p.read_text().replace('"--stride", "2", "--start", "1"', '"--mode", "frontier"'))
+    b, _ = refresh.build_bounds()
+    (lst,) = approvals.signed_lists(b)
+    assert lst["order"] == "unordered"
+    step = cli._step_doc({"command": "crawl-lists", **lst})  # noqa: SLF001
+    assert approvals.list_args(step) == lst  # the step's run_plan carries it: consume_bounded binds it
+
+
+def stopped_walk(tmp_path, mode: str) -> str:
+    d = site(tmp_path, REF)
+    urls = json.loads((d / "urls.json").read_text())
+    (d / "urls.json").write_text(json.dumps(urls | {P(2): {"file": "walk-2.html", "status": 403}}))
+    assert crawl_lists(d, "--mode", mode, "--max-pages", "10") == crawl.EXIT_CHALLENGE
+    (d / "urls.json").write_text(json.dumps(urls))
+    FixtureHttpClient.log.clear()
+    return d
+
+
+@pytest.mark.parametrize("mode", ["walk", "frontier"])
+def test_a_walk_resume_refuses_a_policy_that_changed_since_its_start(data_dir, tmp_path, marker, monkeypatch, mode):
+    """The walk records the policy digest it was approved under; a resume under other rules (a harness bump
+    between the run and its resume) is refused, exit 10, with no GET, as a fetch-ads resume is."""
+    d = stopped_walk(tmp_path, mode)
+    doc = latest_doc()
+    assert doc["list"]["policy_digest"] == policy.DEFAULT.digest()
+    monkeypatch.setattr(policy, "DEFAULT", dataclasses.replace(policy.DEFAULT, confirm_share=0.5))
+    assert main(["crawl", "resume", "--run-id", doc["run_id"], *fix(d)]) == approvals.EXIT_UNAPPROVED
+    assert list_gets() == []
+
+
+def test_a_walk_resume_plan_binds_the_policy_digest(data_dir, tmp_path, marker, monkeypatch):
+    plans = []
+    real = cli.gate
+    monkeypatch.setattr(cli, "gate", lambda args, doc, v: plans.append(doc) or real(args, doc, v))
+    d = stopped_walk(tmp_path, "frontier")
+    rid = latest_doc()["run_id"]
+    assert main(["crawl", "resume", "--run-id", rid, *fix(d)]) == 0
+    assert plans[-1]["policy_digest"] == policy.DEFAULT.digest() and plans[-1]["order"] == "unordered"

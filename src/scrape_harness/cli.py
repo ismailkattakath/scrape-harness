@@ -601,13 +601,19 @@ def _walk(x) -> bool:
     return _mode(x) in plan.WALK_MODES
 
 
-def _walk_signed(args: argparse.Namespace) -> dict:
+def _walk_signed(args: argparse.Namespace, source) -> dict:
     """What a walk's plan and its refresh list set sign beyond the arguments: the policy digest its outcome is
-    judged by, and a frontier's K (policy.frontier_k; the confirmation thresholds ride in the digest)."""
+    judged by, and a frontier's K (policy.frontier_k; the confirmation thresholds ride in the digest) and the
+    source's list order (only bump_desc allows an early stop, so a plug-in edit after the approval is another
+    plan; until a source_digest covers the whole plug-in)."""
     if not _walk(args):
         return {}
-    return {"policy_digest": policy.DEFAULT.digest(),
-            **({"k": policy.DEFAULT.frontier_k} if _mode(args) == "frontier" else {})}  # fmt: skip
+    front = {"k": policy.DEFAULT.frontier_k, "order": _order(source)} if _mode(args) == "frontier" else {}
+    return {"policy_digest": policy.DEFAULT.digest(), **front}
+
+
+def _order(source) -> str:
+    return getattr(source, "order", "unordered")
 
 
 def _check_walk(args: argparse.Namespace) -> None:
@@ -661,7 +667,7 @@ def cmd_crawl_lists(args: argparse.Namespace) -> int:
             **({"min_pages": args.min_pages} if args.min_pages is not None else {}),
             # a walk's outcome is judged by the good-crawl rules, which the policy digest covers (a frontier's
             # anchor rules too); a frontier signs its K
-            **_walk_signed(args),
+            **_walk_signed(args, source),
         ),
         [variant],
     )
@@ -682,11 +688,12 @@ def cmd_crawl_lists(args: argparse.Namespace) -> int:
     if _walk(args):  # the walk's signed state, on the run doc from the start (a resume reads it back)
         job.doc["list"] = {"mode": args.mode, "stride": 1, "ceiling": args.max_pages, "pages_read": 0,
                            "settled": 0, "subcategory": args.subcategory, "region": args.region,
+                           "policy_digest": policy.DEFAULT.digest(),  # the rules it was approved under
                            **({"min_pages": args.min_pages} if args.min_pages is not None else {})}  # fmt: skip
     if _mode(args) == "frontier":  # its reference, chosen ONCE from DATA (a resume keeps it), and its order
         ref = plan.frontier_reference(crawl.run_docs(), store.read("events"), store.read("observations"),
                                       site=source.site, subcategory=args.subcategory, region=args.region)  # fmt: skip
-        job.doc["list"] |= {"k": policy.DEFAULT.frontier_k, "order": getattr(source, "order", "unordered"),
+        job.doc["list"] |= {"k": policy.DEFAULT.frontier_k, "order": _order(source),
                             "ref_crawl_id": ref["crawl_id"] if ref else None}  # fmt: skip
         job.save()
         # page 1 only: the handler enqueues each next page after it handles the current one
@@ -1289,6 +1296,11 @@ def cmd_crawl_resume(args: argparse.Namespace) -> int:
         print(f"refusing: walk {job.doc['run_id']} settled its signed ceiling of {lst['ceiling']} list GETs; "
               "plan a new crawl instead", file=sys.stderr)  # fmt: skip
         return crawl.EXIT_INCOMPLETE
+    if _walk(lst) and lst.get("policy_digest") != policy.DEFAULT.digest():  # before the gate: nothing is sent
+        print(f"refusing: walk {job.doc['run_id']} was approved under policy {lst.get('policy_digest') or 'none'}, "
+              f"and the rules are now {policy.DEFAULT.digest()}: its outcome would be judged by rules the operator "
+              "never signed; plan a new crawl instead", file=sys.stderr)  # fmt: skip
+        return approvals.EXIT_UNAPPROVED
     source = load("sources", job.doc["source"])
     # the plan signs the proxy the run will actually use: its own (a resume keeps it), not a new choice
     args.kept_proxy = (job.doc.get("proxy") or {}).get("url")
@@ -1305,9 +1317,9 @@ def cmd_crawl_resume(args: argparse.Namespace) -> int:
             resumes=job.doc["command"],
             pending=crawl.pending(job),  # what is left to send: the card shows it, the approval binds it
             # a walk's signed ceiling and what it already settled: the approval binds what is left of it
-            **({k: lst[k] for k in ("mode", "ceiling", "settled")} if _walk(lst) else {}),
-            # a frontier's reference, recorded at its start: never chosen again
-            **({"ref_crawl_id": lst.get("ref_crawl_id")} if _mode(lst) == "frontier" else {}),
+            **({k: lst[k] for k in ("mode", "ceiling", "settled", "policy_digest")} if _walk(lst) else {}),
+            # a frontier's reference and list order, recorded at its start: never chosen or read again
+            **({k: lst.get(k) for k in ("ref_crawl_id", "order")} if _mode(lst) == "frontier" else {}),
         ),
         [job.doc["variant"]],
     )

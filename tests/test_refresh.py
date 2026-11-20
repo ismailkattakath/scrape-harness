@@ -255,6 +255,27 @@ def test_a_fetch_ads_policy_digest_mismatch_is_not_approved_and_appends_nothing(
     assert approvals.consume_bounded(crawl_doc(), st["run_id"], "crawl-lists")  # list steps sign no ad policy
 
 
+WALK_SET = {"subcategory": "widgets", "region": "sample-region", "page_count": None, "stride": 1, "start": None,
+            "seed": None, "max_pages": 5, "mode": "frontier", "k": 5, "order": "unordered",
+            "policy_digest": policy.DEFAULT.digest()}  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "sent", [{"policy_digest": "sha256:" + "0" * 64}, {"order": "bump_desc"}], ids=["policy", "order"]
+)
+def test_a_walk_step_whose_rules_changed_is_not_approved_and_appends_nothing(data_dir, sent):
+    """A walk step whose policy digest (or a frontier's list order) differs from its signed set's is no
+    approval at all (exit 10, nothing appended), before any bound is compared: the rules changed since the
+    approval, the arguments did not. Never a bound breach (exit 3), which would spend the approval."""
+    _, st = sign(bounds(lists=WALK_SET, max_list_pages=5))
+    before = lines(data_dir)
+    doc = crawl_doc(list_pages=5, **{k: v for k, v in WALK_SET.items()}) | sent
+    with pytest.raises(approvals.NotApproved, match="changed since the approval"):
+        approvals.consume_bounded(doc, st["run_id"], "crawl-lists")
+    assert lines(data_dir) == before
+    assert approvals.consume_bounded(crawl_doc(list_pages=5, **WALK_SET), st["run_id"], "crawl-lists")["bounded"]
+
+
 def test_the_bounds_sign_the_fetch_ads_policy(chain, data_dir, capsys):
     capsys.readouterr()
     assert main(["refresh", "--approve-network"]) == 10

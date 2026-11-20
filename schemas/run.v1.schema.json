@@ -466,6 +466,7 @@
         "region": {"type": "string", "description": "A walk's region: a later frontier finds its reference by it."},
         "k": {"type": "integer", "minimum": 2, "description": "A frontier's signed K: a candidate anchor is K consecutive parsed cards holding consecutive places in the reference's parsed order."},
         "order": {"type": "string", "description": "A frontier: the source's declared list order. Only bump_desc allows an early stop; any other value walks to a positive END or the ceiling."},
+        "policy_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "A walk's SyncPolicy digest at its start, the rules its approval signed: a resume under another digest is refused (exit 10)."},
         "ref_crawl_id": {"type": ["string", "null"], "description": "A frontier's reference crawl, chosen once at its start (plan.frontier_reference; a resume keeps it); null when none existed (a bootstrap)."},
         "anchor": {
           "type": "object",

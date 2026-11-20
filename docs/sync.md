@@ -391,7 +391,13 @@ is prefetched.
   refresh's signed list set (`approvals.LIST_KEYS_IF_SET`) only when set, so a
   plan without them hashes as before. A walk also signs `policy_digest`
   (`policy.DEFAULT`): its outcome is judged by the good-crawl rules, which the
-  digest covers, so a rule change after the approval is a different plan. A refresh's bounds count exactly
+  digest covers, so a rule change after the approval is a different plan. The
+  run doc records that digest (`list.policy_digest`); `crawl resume` refuses a
+  walk whose recorded digest differs from today's (exit 10, before the gate,
+  0 GETs), and a walk's resume plan binds it. Inside a refresh, a walk step
+  that differs from its signed set only in its digest (or a frontier's order)
+  is no approval at all: `NotApproved`, exit 10, nothing appended, never a
+  bound breach. A refresh's bounds count exactly
   `max_pages` list GETs for a walk step (no `1 +` discovery allowance), and the
   operator's text says "a census walk".
 - **Refused with it:** `--stride` other than 1 (the stride-k depth walk, H4, is
@@ -489,8 +495,11 @@ where today's list runs into what the reference crawl already read.
   the refresh summary prints `GAP after page N (since reference R)`.
 - **Rows** carry `sample_weight` null and `page_count` null: a frontier is
   neither a census nor a sample of the list.
-- **Signed.** `mode: frontier`, `k` and `policy_digest` join the plan and a
-  refresh's list set (`approvals.LIST_KEYS_IF_SET`, only when set). The
+- **Signed.** `mode: frontier`, `k`, `order` (the source's `Source.order`
+  at plan time) and `policy_digest` join the plan and a refresh's list set
+  (`approvals.LIST_KEYS_IF_SET`, only when set). A plug-in that switches its
+  order after the approval is a different plan (exit 10); a resume reads the
+  order recorded at the walk's start, and its plan binds it. The
   confirmation thresholds ride in the digest. `--min-pages` is a census guard
   and is refused with a frontier, as are `--stride` other than 1, `--pages`,
   `--page-count`, `--start` and `--seed`.
@@ -524,8 +533,8 @@ where today's list runs into what the reference crawl already read.
 - **The frontier's reference is chosen at run time, not signed.** It is
   recorded on the run doc and bound by a resume's plan. It only decides where
   the walk may stop early, inside the signed ceiling, so it can save list GETs
-  but never add one. `Source.order` is not signed either (no `source_digest`
-  yet).
+  but never add one. `Source.order` is signed (above), but the rest of the
+  plug-in (its selectors, its parser) is not: no `source_digest` yet.
 - **Run docs created in the same second tie on `created_at`.** The reference
   is then the higher `run_id`: deterministic, not necessarily the later run.
 - **A census walk has no parser-drift ratio guard yet** (ADR-0017 A.4,

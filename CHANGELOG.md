@@ -62,7 +62,11 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   carry it on until a census that read to its END is the reference; it is
   shown as GAP. `SyncPolicy` gains
   `frontier_k`, `confirm_share` and `confirm_inversions`; the lanes version is
-  `select_ads.v4`. `mode`, `k` and the policy digest are signed only when set.
+  `select_ads.v4`. `mode`, `k`, a frontier's `order` and the policy digest
+  are signed only when set. A walk records its policy digest
+  (`list.policy_digest`); `crawl resume` refuses it under another digest
+  (exit 10, 0 GETs), and a refresh walk step whose digest or order differs
+  from its signed set is `NotApproved` (exit 10, nothing appended).
   Walks record `list.subcategory` and `list.region`. See "The frontier walk" in
   [docs/sync.md](docs/sync.md).
 - `ListPage.skipped` (optional): cards the parser could not read.
@@ -71,7 +75,7 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
 - Additive, optional contract fields. run.v1 gains `stop{}`, `list{}`,
   `ads{}` and `breaker{}`. event.v1 gains `ad_id` and the kind `parse_failed`.
   approval.v2 bounds gain `policy_digest`, and their list sets gain `mode`,
-  `min_pages`, `k` and `policy_digest`. Old records still validate.
+  `min_pages`, `k`, `order` and `policy_digest`. Old records still validate.
 - `liveness.py`: a pure per-ad ledger with four states (alive, tombstoned,
   quarantined, held). `corrections.py`: one reader of run corrections.
 - `policy.SyncPolicy`: window, revisit share, stale age, re-admission delay,

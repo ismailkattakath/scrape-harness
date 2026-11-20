@@ -720,7 +720,10 @@ BOUNDED_TIMES = ("not_before", "expires_at")
 LIST_KEYS = ("subcategory", "region", "page_count", "stride", "start", "seed", "max_pages")
 # Signed only when set (explicit pages, list snapshots, the census or frontier walk, its --min-pages, the policy
 # digest a walk is judged by and a frontier's K): a set signed before they existed reads the same.
-LIST_KEYS_IF_SET = ("pages", "snapshot", "mode", "min_pages", "policy_digest", "k")
+LIST_KEYS_IF_SET = ("pages", "snapshot", "mode", "min_pages", "policy_digest", "k", "order")
+# What a walk's set signs beyond its arguments: the rules it is judged by. A step that differs from its signed set
+# only in these is no approval at all (NotApproved, exit 10): the rules changed, not the arguments.
+LIST_RULE_KEYS = ("policy_digest", "order")
 
 
 def list_args(x) -> dict:
@@ -969,6 +972,17 @@ def consume_bounded(
     lp, ar = int(step_doc.get("list_pages") or 0), int(step_doc.get("ad_requests") or 0)
     reasons = sorted(set(step_doc.get("fetch_reasons") or []))
     list_set, list_checks = None, []
+    if step_doc.get("command") == "crawl-lists":  # a walk's rules first: a mismatch is no approval at all
+        args, sets = list_args(step_doc), signed_lists(b)
+        shape = {k: v for k, v in args.items() if k not in LIST_RULE_KEYS}
+        alike = [x for x in sets if {k: v for k, v in list_args(x).items() if k not in LIST_RULE_KEYS} == shape]
+        if alike and not any(list_args(x) == args for x in alike):
+            got = {k: args.get(k) for k in LIST_RULE_KEYS if k in args}
+            raise NotApproved(
+                f"refresh step crawl-lists runs {json.dumps(got, sort_keys=True)}, but approval {aid} signs "
+                f"{json.dumps([{k: list_args(x).get(k) for k in LIST_RULE_KEYS} for x in alike], sort_keys=True)} "
+                f"for the same arguments: the rules changed since the approval; plan a new `{cli} refresh`"
+            )
     if step_doc.get("command") == "crawl-lists":  # its args must be one signed set this run has not crawled
         args = list_args(step_doc)
         sets, done = signed_lists(b), consumed_sets(aid, refresh_run_id, ledger)

@@ -543,6 +543,10 @@
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
           "description": "A walk's SyncPolicy digest: the good-crawl and anchor rules its outcome is judged by. Absent when not a walk."
+        },
+        "order": {
+          "type": "string",
+          "description": "A frontier's Source.order at plan time: only bump_desc allows an early stop, so a plug-in edit after the approval is another set. Absent when not a frontier."
         }
       }
     }

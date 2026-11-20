@@ -245,7 +245,7 @@ def build_bounds(ttl: str = DEFAULT_TTL, max_ad_requests: int | None = None) -> 
                 cli._deterministic(ns)  # noqa: SLF001 - the signed sample is the one crawled
             cli._check_pages(ns)  # noqa: SLF001
             cli._check_walk(ns)  # noqa: SLF001
-            for key, val in cli._walk_signed(ns).items():  # noqa: SLF001 - what a walk's run_plan signs
+            for key, val in cli._walk_signed(ns, source).items():  # noqa: SLF001 - what a walk's run_plan signs
                 setattr(ns, key, val)
             lists.append(approvals.list_args(ns))  # one signed set per step
             if ns.pages:
@@ -649,7 +649,7 @@ def list_step_lines(bounds: dict) -> list[str]:
             ref = plan.frontier_reference(crawl.run_docs(), store.read("events"), store.read("observations"),
                                           site=bounds["site"], subcategory=x.get("subcategory"),
                                           region=x.get("region"))  # fmt: skip
-            how = cli.frontier_words({"order": getattr(source, "order", "unordered"), "k": x.get("k")}, ref)
+            how = cli.frontier_words({"order": x.get("order") or cli._order(source), "k": x.get("k")}, ref)  # noqa: SLF001
             words = f"{how}; {cap}; passes on an anchor, a positive END or the ceiling (a GAP)"
         out.append(f"list step ({i}) {x.get('subcategory')}: {words}")
     return out
