@@ -1,0 +1,18 @@
+{
+  "kind": "command",
+  "cmd": "crawl-lists",
+  "opt": null,
+  "takes_value": false,
+  "required": false,
+  "default": null,
+  "choices": null,
+  "help": "read list pages -> observations.jsonl (depth-stratified)",
+  "declared": {
+    "role": "stage",
+    "position": 1,
+    "network": "site",
+    "operator_only": false,
+    "inputs": [],
+    "outputs": ["DATA:observations.jsonl", "DATA:runs/{run_file}.json"]
+  }
+}

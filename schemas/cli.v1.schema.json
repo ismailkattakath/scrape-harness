@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cli.v1.schema.json",
+  "title": "cli.v1",
+  "description": "One row of `<cli> cli spec`: a command, a positional or an option of the CLI's argparse tree (the core's commands and the consumer's [plugins].commands). Rows are sorted by cmd, then kind (command, positional, option), positionals in argument order and options by name, so the JSONL is deterministic. Generated, never data.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "cmd", "opt", "takes_value", "required", "default", "choices", "help", "declared"],
+  "properties": {
+    "kind": { "enum": ["command", "positional", "option"] },
+    "cmd": { "type": "string", "minLength": 1, "description": "The command path, space-joined, e.g. `crawl resume`." },
+    "opt": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "description": "An option's long form (e.g. `--approve-network`) or a positional's name; null on a command row."
+    },
+    "takes_value": { "type": "boolean", "description": "False for a flag (its presence is the value) and on a command row." },
+    "required": { "type": "boolean" },
+    "default": { "type": ["string", "null"], "description": "The default as text; null for none, for a flag and on a command row." },
+    "choices": { "type": ["array", "null"], "items": { "type": "string" } },
+    "help": { "type": ["string", "null"] },
+    "declared": {
+      "description": "On a command row: its pipeline.toml [[stages]] or [[utilities]] entry, or null when undeclared. Always null on an argument row.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["role", "position", "network", "operator_only", "inputs", "outputs"],
+          "properties": {
+            "role": { "enum": ["stage", "utility"] },
+            "position": { "type": ["integer", "null"], "minimum": 1, "description": "A stage's place in the order (Stage N/M); null for a utility." },
+            "network": { "enum": ["none", "site", "paid"] },
+            "operator_only": { "type": "boolean" },
+            "inputs": { "type": "array", "items": { "type": "string" } },
+            "outputs": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "command" } } },
+      "then": { "properties": { "opt": { "type": "null" }, "takes_value": { "const": false } } },
+      "else": { "properties": { "opt": { "type": "string" }, "declared": { "type": "null" } } }
+    }
+  ]
+}

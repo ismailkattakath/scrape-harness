@@ -26,6 +26,7 @@ CLI, the safety checks and the tooling from this flake.
 | **Append-only store** | Typed JSONL under a data root **outside any git repository**; the CLI refuses a data path inside one. |
 | **Gates** | `leak-gate` and `public-gate` (forbidden literals and gitleaks), and `ship`, the one push path. |
 | **Claude Code plugin** | Hooks that keep an agent inside the same rules, pinned in `flake.lock`. |
+| **CLI spec** | `<cli> cli spec` prints every command and flag (the consumer's own plug-in commands too) as `cli.v1` JSONL, with each command's network class from `pipeline.toml`. `--format md` renders a reference ([docs/cli.md](docs/cli.md) is the example's); `--check FILE` fails on drift. A plug-in command takes the network flags from `cli.network_args(sp)`, or only `--approve-network` from `cli.approve_network_arg(sp)`. |
 
 ## Quick start
 

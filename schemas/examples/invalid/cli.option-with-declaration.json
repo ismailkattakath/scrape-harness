@@ -1,0 +1,18 @@
+{
+  "kind": "option",
+  "cmd": "crawl-lists",
+  "opt": "--stride",
+  "takes_value": true,
+  "required": false,
+  "default": "1",
+  "choices": null,
+  "help": "every k-th page (1 = census)",
+  "declared": {
+    "role": "stage",
+    "position": 1,
+    "network": "site",
+    "operator_only": false,
+    "inputs": [],
+    "outputs": []
+  }
+}

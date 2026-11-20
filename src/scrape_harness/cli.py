@@ -1866,6 +1866,13 @@ def cmd_plugins(_: argparse.Namespace) -> int:
 # ── argument parsing ─────────────────────────────────────────────────────────────────────────
 
 
+def cmd_cli_spec(args: argparse.Namespace) -> int:
+    """The command and flag tree as cli.v1 rows (clispec.py); offline, reads only the parser."""
+    from . import clispec
+
+    return clispec.cmd(args)
+
+
 def cmd_claude_settings(args: argparse.Namespace) -> int:
     """Render the project's .claude/settings.json from pipeline.toml (--write), or check it (default)."""
     from . import claude_settings
@@ -1878,42 +1885,52 @@ def cmd_claude_settings(args: argparse.Namespace) -> int:
     return 0 if ok else EXIT_CONFIG
 
 
+APPROVE_NETWORK_HELP = "the operator approved THIS networked run"
+
+
+def approve_network_arg(sp: argparse.ArgumentParser) -> None:
+    """Public for consumer commands ([plugins].commands) that need only the approval flag (e.g. an export
+    or a token command): the same `--approve-network` every networked core command takes."""
+    sp.add_argument("--approve-network", action="store_true", help=APPROVE_NETWORK_HELP)
+
+
+def network_args(sp: argparse.ArgumentParser) -> None:
+    """Public for consumer commands ([plugins].commands): the network flags of every networked core
+    command (approval, proxy pick, politeness ceiling, --plan), with one definition of each flag."""
+    approve_network_arg(sp)
+    sp.add_argument(
+        "--proxy-exclude",
+        action="append",
+        metavar="TEXT",
+        help="--plan: never choose a [crawl.proxy] url containing TEXT (repeatable); the plan signs the pick",
+    )
+    sp.add_argument(
+        "--concurrency",
+        type=int,
+        default=crawl.CONCURRENCY,
+        help=f"parallel requests (default and ceiling {crawl.CONCURRENCY})",
+    )
+    sp.add_argument(
+        "--max-tasks-per-minute",
+        type=float,
+        default=crawl.DEFAULT_RATE,
+        help=f"rate limit (default {crawl.DEFAULT_RATE}; ceiling {crawl.MAX_RATE})",
+    )
+    sp.add_argument(
+        "--approve-politeness-override",
+        action="store_true",
+        help="the OPERATOR approved exceeding the concurrency/rate ceiling for this run",
+    )
+    sp.add_argument(
+        "--plan",
+        action="store_true",
+        help=f"print this run's canonical plan and plan_hash for `{pipeline.consumer().cli} approve`; no network",
+    )
+
+
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=pipeline.consumer().cli, description=(__doc__ or "").split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
-
-    def net(sp: argparse.ArgumentParser) -> None:
-        sp.add_argument(
-            "--approve-network", action="store_true", help="the operator approved THIS networked run"
-        )
-        sp.add_argument(
-            "--proxy-exclude",
-            action="append",
-            metavar="TEXT",
-            help="--plan: never choose a [crawl.proxy] url containing TEXT (repeatable); the plan signs the pick",
-        )
-        sp.add_argument(
-            "--concurrency",
-            type=int,
-            default=crawl.CONCURRENCY,
-            help=f"parallel requests (default and ceiling {crawl.CONCURRENCY})",
-        )
-        sp.add_argument(
-            "--max-tasks-per-minute",
-            type=float,
-            default=crawl.DEFAULT_RATE,
-            help=f"rate limit (default {crawl.DEFAULT_RATE}; ceiling {crawl.MAX_RATE})",
-        )
-        sp.add_argument(
-            "--approve-politeness-override",
-            action="store_true",
-            help="the OPERATOR approved exceeding the concurrency/rate ceiling for this run",
-        )
-        sp.add_argument(
-            "--plan",
-            action="store_true",
-            help=f"print this run's canonical plan and plan_hash for `{pipeline.consumer().cli} approve`; no network",
-        )
 
     def driver(sp: argparse.ArgumentParser) -> None:
         sp.add_argument(
@@ -1969,7 +1986,7 @@ def parser() -> argparse.ArgumentParser:
         "raw/lists/<site>/<crawl_id>/, before any parse or stop; a 404/410 list page is recorded, not a stop",
     )
     driver(c)
-    net(c)
+    network_args(c)
     c.add_argument(
         "--refresh-run",
         metavar="RUN_ID",
@@ -2021,7 +2038,7 @@ def parser() -> argparse.ArgumentParser:
         help="with --supersede: take its FAILED ads (retries exhausted) instead of its pending ones",
     )
     driver(f)
-    net(f)
+    network_args(f)
     f.add_argument(
         "--refresh-run",
         metavar="RUN_ID",
@@ -2071,7 +2088,7 @@ def parser() -> argparse.ArgumentParser:
     rs.add_argument("--run-id", help="default: the latest unfinished run")
     rs.add_argument("--max-pages", type=int, default=60)
     driver(rs)
-    net(rs)
+    network_args(rs)
     rs.set_defaults(fn=cmd_crawl_resume)
     cc = crs.add_parser(
         "correct",
@@ -2136,7 +2153,7 @@ def parser() -> argparse.ArgumentParser:
         "--proxy-only", metavar="TEXT", help="--plan: the one configured proxy URL containing TEXT"
     )
     driver(po)
-    net(po)
+    network_args(po)
     po.set_defaults(fn=cmd_probe_robots)
 
     b = sub.add_parser("browser", help="the dedicated browser profile")
@@ -2155,7 +2172,7 @@ def parser() -> argparse.ArgumentParser:
         "--variants", help="comma-separated (default: all but desktop-unblocked, an explicit A/B arm)"
     )
     driver(ab)
-    net(ab)
+    network_args(ab)
     ab.set_defaults(fn=cmd_ab)
 
     rp = sub.add_parser("reparse", help="re-extract listings from saved ad snapshots, OFFLINE (no new views)")
@@ -2194,6 +2211,28 @@ def parser() -> argparse.ArgumentParser:
     v.set_defaults(fn=cmd_validate)
 
     sub.add_parser("plugins", help="list registered sources, drivers, variants").set_defaults(fn=cmd_plugins)
+    cl = sub.add_parser("cli", help="this CLI described: the command and flag tree (offline)")
+    cls = cl.add_subparsers(dest="action", required=True)
+    csp = cls.add_parser(
+        "spec",
+        help="every command, positional and option (consumer plug-ins included) as cli.v1 JSONL, sorted, "
+        "with its pipeline.toml declaration (stage/utility, network class, inputs, outputs)",
+    )
+    csp.add_argument(
+        "--format",
+        choices=["jsonl", "json", "md"],
+        default="jsonl",
+        help="jsonl: one cli.v1 row per line; json: one array of the same rows; md: a command reference",
+    )
+    csp.add_argument(
+        "--json", dest="format", action="store_const", const="json", help="the same as --format json"
+    )
+    csp.add_argument(
+        "--check",
+        metavar="FILE",
+        help="regenerate in --format and compare with FILE: exit 0 the same, 1 drift (a unified diff)",
+    )
+    csp.set_defaults(fn=cmd_cli_spec)
     # The consumer's own subcommands (e.g. analysis stages), declared in pipeline.toml [plugins].commands.
     for spec in pipeline.current().commands:
         pipeline.resolve(spec)(sub)
