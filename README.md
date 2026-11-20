@@ -163,9 +163,37 @@ approval. It is a **strict chain**: a failed step stops every step after it.
 | `packages.default` / `apps.default` | the example consumer's CLI |
 | `packages.plugin` | the Claude Code plugin at the pinned revision |
 | `apps.env-doctor`, `apps.leak-gate`, `apps.public-gate`, `apps.ship` | the consumer tools |
+| `apps.examplesite`, `apps.preflight`, `apps.cli-spec` | the CLI with the checkout's env files loaded (see below) |
 | `lib` | for a consumer flake: `python`, `pyDeps`, `browsers`, `filterLists`, `wrapperArgs`, `sshKeyTools`, `cliSmoke`, `consumerTools` |
 | `templates.default` | the consumer skeleton |
-| `checks` | package (pytest), ruff, formatting, CLI smoke, schema and template gates, toolchain-complete |
+| `checks` | package (pytest), ruff, formatting, CLI smoke, schema and template gates, `cli-spec-drift`, `consumer-apps`, toolchain-complete |
+
+### Consumer tools
+
+`scrape-harness.lib.consumerTools` is the one generator of a consumer's
+tools. It reads the consumer's `pipeline.toml` `[consumer]` table. The
+harness builds its own example consumer's tools with it.
+
+| Argument | Gives |
+|---|---|
+| `pkgs`, `consumer` | `env-doctor`, `leak-gate`, `public-gate`, `ship` |
+| `cliPackage` | `apps.<cli>`, `apps.preflight`, `apps.cli-spec` (and `appPackages`) |
+| `cliSpecDoc` (+ `pipeline`) | `checks.cli-spec-drift` |
+
+A consumer merges `apps`, `appPackages` and `checks` into its own outputs.
+
+`nix run .#<cli> -- refresh --dry-run` runs the CLI from any shell:
+
+- It loads `.env`, `.env.local`, `.env.development.local` and
+  `.envrc.local` from the checkout root, as the dev shell's `.envrc` does.
+- An exported name always wins. Each file sets only names still unset.
+- `.envrc.local` is plain shell, sourced after the dotenv files. direnv's
+  own functions are not there.
+- It refuses (exit 4) outside a git checkout of this consumer.
+- It prints no value.
+
+`nix run .#preflight -- refresh` is `<cli> preflight refresh`.
+`nix run .#cli-spec -- --format md` is `<cli> cli spec --format md`.
 
 Systems: `aarch64-darwin` (the target), `aarch64-linux` and `x86_64-linux`.
 

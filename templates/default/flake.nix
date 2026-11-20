@@ -4,6 +4,8 @@
 #
 #   nix develop          → python + the harness, this project's CLI ([consumer].cli), ruff, gitleaks
 #   nix run              → the CLI;  nix run .#ship → THE push;  nix run .#env-doctor / .#leak-gate
+#   nix run .#<cli> -- … → the CLI with this checkout's .env* and .envrc.local loaded, from any shell
+#                          (also .#preflight, .#cli-spec)
 #   nix flake check      → the package build (runs pytest) + formatting
 {
   description = "a scrape-harness pipeline";
@@ -72,19 +74,26 @@
         harness.consumerTools {
           inherit pkgs consumer;
           plugin = "${plugin pkgs}";
+          cliPackage = cli pkgs; # apps.<cli>, apps.preflight, apps.cli-spec
+          # cliSpecDoc = ./docs/cli.md;  # commit `<cli> cli spec --format md > docs/cli.md`, then this adds checks.cli-spec-drift
         };
     in
     {
-      packages = forAll (pkgs: {
-        default = cli pkgs;
-        inherit (tools pkgs) env-doctor leak-gate ship;
-      });
+      packages = forAll (
+        pkgs:
+        {
+          default = cli pkgs;
+          inherit (tools pkgs) env-doctor leak-gate ship;
+        }
+        // (tools pkgs).appPackages
+      );
       apps = forAll (
         pkgs:
         lib.genAttrs [ "env-doctor" "leak-gate" "ship" ] (n: {
           type = "app";
           program = lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.${n};
         })
+        // (tools pkgs).apps
       );
       devShells = forAll (pkgs: {
         default = pkgs.mkShell {
@@ -113,6 +122,6 @@
           shellHook = ''export PRJ_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"'';
         };
       });
-      checks = forAll (pkgs: self.packages.${pkgs.stdenv.hostPlatform.system});
+      checks = forAll (pkgs: self.packages.${pkgs.stdenv.hostPlatform.system} // (tools pkgs).checks);
     };
 }

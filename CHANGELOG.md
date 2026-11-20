@@ -56,6 +56,23 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   empty, it refuses with exit 2 and names it. Nothing is planned, claimed,
   spent or sent. `refresh --dry-run` prints the same warning and goes on.
   A refresh that declares no `secrets_env` behaves as before.
+- `consumerTools` takes `cliPackage` (the consumer's CLI package). With it,
+  the flake gets `apps.<cli>`, `apps.preflight` and `apps.cli-spec`.
+  `nix run .#<cli> -- ...` works from any shell, with no `nix develop -c`.
+  - The app loads the checkout's `.env`, `.env.local`,
+    `.env.development.local` and `.envrc.local`, as the dev shell's direnv
+    chain does. A name is set only when it is unset, so an exported value
+    always wins.
+  - `.envrc.local` is sourced as shell, after the dotenv files.
+  - The app refuses with exit 4 outside a git checkout of this consumer
+    (its `pipeline.toml` `[consumer].cli`), or when `.envrc.local` exits.
+  - It never prints a value. The cwd and the arguments are unchanged.
+    `PRJ_ROOT` is the checkout root.
+- `consumerTools` takes `cliSpecDoc` (and `pipeline`, for a CLI that embeds
+  none). With it, `checks.cli-spec-drift` fails when the committed doc
+  differs from `cli spec --format md`. The harness checks its `docs/cli.md`
+  this way.
+- The template flake passes `cliPackage`, so a new consumer gets the apps.
 
 - `crawl-lists --snapshot`: each answered list page is saved as gzip under
   `raw/lists/<site>/<crawl_id>/<page>.html.gz`, with a `list_snapshot.v1`

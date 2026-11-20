@@ -206,6 +206,12 @@
           inherit lib pkgs consumer;
           plugin = "${self.packages.${pkgs.stdenv.hostPlatform.system}.plugin}";
           public = true; # a public repo: ship also runs public-gate
+          # apps.examplesite / .preflight / .cli-spec, and checks.cli-spec-drift over docs/cli.md
+          # `li pkgs`, not self.packages.default: packages merges appPackages, whose names depend on this
+          # argument, so going through self.packages would be an infinite recursion
+          cliPackage = li pkgs;
+          cliSpecDoc = ./docs/cli.md;
+          pipeline = ./pipeline.toml; # the example's package embeds none
         };
 
       # ssh-keygen / ssh-agent / ssh-add ONLY (approval signatures and their tests), never `ssh`: Nix's
@@ -297,7 +303,9 @@
         filterLists = filterListsFor; # the pinned EasyList + EasyPrivacy (a consumer's tests set the env from it)
         wrapperArgs = wrapperArgsFor;
         sshKeyTools = sshKeyToolsFor;
-        # args: { pkgs, consumer, extraCatalogue ? { }, plugin ? "./plugin", shipLocalChecks ? [ ] } (see nix/consumer.nix)
+        # args: { pkgs, consumer, extraCatalogue ? { }, plugin ? "./plugin", shipLocalChecks ? [ ], public ? false,
+        #   cliPackage ? null, cliSpecDoc ? null, pipeline ? null } (see nix/consumer.nix). Returns packages
+        #   (env-doctor, leak-gate, public-gate, ship), `apps` and `checks` attrsets to merge.
         consumerTools = args: import ./nix/consumer.nix ({ inherit lib; } // args);
       };
 
@@ -310,21 +318,27 @@
 
       formatter = forAll (pkgs: treefmtEval.${pkgs.stdenv.hostPlatform.system}.config.build.wrapper);
 
-      packages = forAll (pkgs: {
-        default = li pkgs;
+      packages = forAll (
+        pkgs:
+        {
+          default = li pkgs;
 
-        inherit (consumerTools pkgs)
-          env-doctor
-          leak-gate
-          public-gate
-          ship
-          ;
-        # The plugin as a store path: a consumer's tests run its guard against their pipeline.toml.
-        # The plugin at the pinned marketplace rev, as a store path (hooks run from it).
-        plugin = pkgs.runCommandLocal "scrape-harness-plugin" { } ''
-          cp -r ${kattakath-skills}/plugins/scrape-harness "$out"
-        '';
-      });
+          inherit (consumerTools pkgs)
+            env-doctor
+            leak-gate
+            public-gate
+            ship
+            ;
+          # The plugin as a store path: a consumer's tests run its guard against their pipeline.toml.
+          # The plugin at the pinned marketplace rev, as a store path (hooks run from it).
+          plugin = pkgs.runCommandLocal "scrape-harness-plugin" { } ''
+            cp -r ${kattakath-skills}/plugins/scrape-harness "$out"
+          '';
+        }
+        # the env-loading app wrappers (<cli>, preflight, cli-spec): packages too, so checks build (and
+        # shellcheck) them
+        // (consumerTools pkgs).appPackages
+      );
 
       apps = forAll (
         pkgs:
@@ -340,6 +354,8 @@
             meta.description = "the ${consumer.cli} CLI";
           };
         }
+        # `nix run .#examplesite -- ...`, .#preflight, .#cli-spec: the CLI with the checkout's env loaded
+        // (consumerTools pkgs).apps
       );
 
       devShells = forAll (pkgs: {
@@ -364,6 +380,7 @@
           system = pkgs.stdenv.hostPlatform.system;
         in
         self.packages.${system}
+        // (consumerTools pkgs).checks # cli-spec-drift
         // {
           formatting = treefmtEval.${system}.config.build.check self;
 
@@ -469,6 +486,74 @@
               touch "$out"
             '';
 
+          # GOES RED WHEN: `nix run .#<cli>` (and .#preflight, .#cli-spec) loads the env differently from the
+          # dev shell's direnv chain: precedence ambient > .envrc.local > .env.development.local > .env.local >
+          # .env, .envrc.local evaluated after the dotenv files, root = the git toplevel (PRJ_ROOT) with the
+          # cwd and argv unchanged; or it runs outside a git checkout of THIS consumer, runs after an
+          # .envrc.local that exited, or prints a value. A stub CLI records what it got; synthetic values only.
+          consumer-apps =
+            let
+              stub = pkgs.writeShellScriptBin consumer.cli ''
+                {
+                  for n in SYN_A SYN_B SYN_C SYN_D SYN_E SYN_F SYN_AMB; do printf '%s=%s\n' "$n" "''${!n:-}"; done
+                  printf 'PWD=%s\nPRJ_ROOT=%s\n' "$PWD" "''${PRJ_ROOT:-}"
+                  for a in "$@"; do printf 'ARG=%s\n' "$a"; done
+                } > "$REPORT"
+              '';
+              tools = self.lib.consumerTools {
+                inherit pkgs consumer;
+                cliPackage = stub;
+              };
+              app = n: tools.apps.${n}.program;
+            in
+            pkgs.runCommandLocal "consumer-apps" { nativeBuildInputs = [ pkgs.git ]; } ''
+              export HOME="$TMPDIR"; cd "$TMPDIR"
+              export REPORT="$TMPDIR/report" SYN_AMB=ambient-wins
+              fail() { echo "consumer-apps: $*" >&2; [ -f "$REPORT" ] && cat "$REPORT" >&2; exit 1; }
+              want() { grep -qxF "$1" "$REPORT" || fail "the CLI did not get: $1"; }
+              git init -q repo; mkdir -p repo/sub/dir
+              printf '[consumer]\ncli = "${consumer.cli}"\n' > repo/pipeline.toml
+              printf 'SYN_A=from-env\nSYN_B=from-env\nSYN_C=from-env\nSYN_D=from-env\nSYN_F=from-env\nSYN_AMB=from-env\n' > repo/.env
+              printf '# a comment\nexport SYN_B="from-env-local"\nSYN_C=from-env-local\nSYN_D=from-env-local\n' > repo/.env.local
+              printf "SYN_C='from-env-dev-local'\nSYN_D=from-env-dev-local\n" > repo/.env.development.local
+              cat > repo/.envrc.local <<'EOF'
+              export SYN_D=from-envrc-local
+              export SYN_AMB=from-envrc-local
+              export SYN_E="$SYN_A-derived"
+              export SYN_F="''${SYN_F:-from-envrc-default}"
+              echo "from-envrc-stdout $SYN_D"
+              false
+              EOF
+              cd repo/sub/dir
+              ${app consumer.cli} one "two words" > out 2> err || fail "the app failed: $(cat err)"
+              for kv in SYN_A=from-env SYN_B=from-env-local SYN_C=from-env-dev-local SYN_D=from-envrc-local \
+                SYN_E=from-env-derived SYN_F=from-env SYN_AMB=ambient-wins \
+                "PWD=$TMPDIR/repo/sub/dir" "PRJ_ROOT=$TMPDIR/repo" "ARG=one" "ARG=two words"; do want "$kv"; done
+              [ "$(grep -c '^ARG=' "$REPORT")" = 2 ] || fail "argv changed"
+              if grep -q 'from-' out err; then fail "the loader printed a value"; fi
+              rm "$REPORT"; ${app "preflight"} refresh --json >/dev/null 2>&1 || fail "preflight failed"
+              want "ARG=preflight"; want "ARG=refresh"; [ "$(head -n 1 <(grep '^ARG=' "$REPORT"))" = ARG=preflight ] || fail "preflight argv"
+              rm "$REPORT"; ${app "cli-spec"} --format md >/dev/null 2>&1 || fail "cli-spec failed"
+              [ "$(grep '^ARG=' "$REPORT" | tr '\n' ' ')" = "ARG=cli ARG=spec ARG=--format ARG=md " ] || fail "cli-spec argv"
+              # refusals: exit 4 (the CLI's config refusal), and the CLI never runs
+              refused() { # $1 = what the message must say; the rest = the command
+                local msg="$1"; shift; rm -f "$REPORT"; rc=0; "$@" > out 2> err || rc=$?
+                [ "$rc" = 4 ] || fail "expected exit 4, got $rc: $msg"
+                grep -qF "$msg" err || fail "the refusal does not say: $msg ($(cat err))"
+                [ ! -f "$REPORT" ] || fail "the CLI ran after a refusal: $msg"
+                if grep -q 'from-' out err; then fail "a refusal printed a value"; fi
+              }
+              cd "$TMPDIR"; mkdir nogit; cd nogit
+              refused "not inside a git checkout" ${app consumer.cli} --help
+              cd "$TMPDIR"; git init -q other; printf '[consumer]\ncli = "someother"\n' > other/pipeline.toml; cd other
+              refused "not a ${consumer.cli} checkout" ${app consumer.cli} --help
+              cd "$TMPDIR"; git init -q bare; cd bare
+              refused "not a ${consumer.cli} checkout" ${app consumer.cli} --help
+              cd "$TMPDIR/repo"; printf 'export SYN_X=from-x\nexit 3\n' > .envrc.local
+              refused ".envrc.local did not finish" ${app consumer.cli} --help
+              touch "$out"
+            '';
+
           # GOES RED WHEN: the leak gate's persona.allow handling is wrong: an allowed form must pass, while
           # the forbidden name alone, a line mixing it with an allowed form, and (unset) the allowed form
           # itself must all fail. Synthetic strings in a throwaway repo; the real lists stay outside.
@@ -545,6 +630,11 @@
             (self.lib.consumerTools {
               inherit pkgs consumer;
               plugin = "${self.packages.${system}.plugin}";
+              shipLocalChecks = [ "true" ];
+              public = true;
+              cliPackage = self.packages.${system}.default;
+              cliSpecDoc = ./docs/cli.md;
+              pipeline = ./pipeline.toml;
               extraCatalogue.SYNTHETIC_KEY = {
                 need = "optional";
                 secret = true;
