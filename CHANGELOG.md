@@ -52,6 +52,9 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   by a literal-hash test). `refresh` refuses, before any plan is saved, when
   the flags leave no url or `--proxy-only` does not match exactly one. A live
   approval of an excluded url is not used. A resume keeps its signed proxy.
+  One function, `proxy.allowed`, makes this pick for `refresh`, `probe
+  robots --proxy-only` and a crawl plan's `--proxy-exclude`. A crawl plan's
+  "leaves no proxy" refusal now repeats the flag per text, as refresh's does.
   `--json` prints one `preflight.v1` object; the default is a short table.
   `--egress` adds the egress check, one request to the trace endpoint. It is
   off by default, so a preflight sends nothing. Exit 0 when all pass, 2 when
@@ -86,6 +89,10 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   differs from `cli spec --format md`. The harness checks its `docs/cli.md`
   this way.
 - The template flake passes `cliPackage`, so a new consumer gets the apps.
+  It ships an `.envrc` that loads the same files the apps load.
+- `checks.template-wiring` fails when the template flake uses a lib
+  function, a `consumerTools` argument or a `consumerTools` output that the
+  harness lacks, for example a renamed `appPackages`.
 
 - `crawl-lists --snapshot`: each answered list page is saved as gzip under
   `raw/lists/<site>/<crawl_id>/<page>.html.gz`, with a `list_snapshot.v1`

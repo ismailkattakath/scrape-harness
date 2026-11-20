@@ -417,6 +417,44 @@
                 touch "$out"
               '';
 
+          # GOES RED WHEN: the template flake names a lib function, a consumerTools argument or a
+          # consumerTools output that the harness does not have (e.g. a renamed appPackages). Read from the
+          # template's text at eval time: evaluating its outputs would need its FILLED pipeline.toml, i.e.
+          # import-from-derivation, which `nix flake check` cannot do for the other systems.
+          template-wiring =
+            let
+              text = builtins.readFile ./templates/default/flake.nix;
+              foundIn = s: re: lib.unique (map lib.last (builtins.filter builtins.isList (builtins.split re s)));
+              found = foundIn text;
+              words = s: builtins.filter (w: w != "") (lib.splitString " " s);
+              outputs =
+                found "\\(tools pkgs\\)\\.([A-Za-z0-9_-]+)"
+                ++ lib.concatMap words (found "inherit \\(tools pkgs\\) ([^;]+);");
+              libFns = found "[^-A-Za-z]harness\\.([A-Za-z]+)";
+              # the consumerTools call's argument names, its commented-out suggestions (cliSpecDoc) included
+              call = lib.head (
+                lib.splitString "\n        };" (lib.last (lib.splitString "harness.consumerTools {" text))
+              );
+              args = lib.unique (
+                lib.concatMap words (foundIn call "inherit ([^;(]+);") ++ foundIn call "\n *(# )?([A-Za-z]+) = "
+              );
+              tools = consumerTools pkgs;
+              missing =
+                map (n: "consumerTools output ${n}") (builtins.filter (n: !(tools ? ${n})) outputs)
+                ++ map (n: "lib.${n}") (builtins.filter (n: !(self.lib ? ${n})) libFns)
+                ++ map (n: "consumerTools argument ${n}") (
+                  builtins.filter (n: !(lib.functionArgs (import ./nix/consumer.nix) ? ${n})) args
+                );
+            in
+            assert outputs != [ ] && libFns != [ ];
+            pkgs.runCommandLocal "template-wiring" { } ''
+              ${lib.concatMapStrings (
+                m:
+                "echo ${lib.escapeShellArg "template-wiring: the template uses ${m}, which the harness lacks"} >&2\n"
+              ) missing}
+              ${if missing == [ ] then "touch $out" else "exit 1"}
+            '';
+
           # GOES RED WHEN: the template, filled with synthetic values, does not build and pass its own tests
           # (pipeline loads, source declared, generated settings current), the way a new consumer would.
           template-instantiated =
