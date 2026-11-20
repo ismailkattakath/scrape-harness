@@ -245,6 +245,8 @@ def test_a_failed_frontier_page_settles_and_resumes_within_the_ceiling(data_dir,
     assert list_gets() == [P(1), P(2), P(2), P(2), P(3)]
     lst = doc_of(doc["run_id"])["list"]
     assert lst["status"] == "ceiling_hit" and lst["settled"] == 5 and lst["pages_read"] == 3
+    # the GAP starts after the last page READ (3), not after the ceiling (5): a retry spent a GET, not a page
+    assert lst["gap"]["after_page"] == 3
 
 
 def test_a_candidate_on_the_ceiling_page_is_ceiling_hit(data_dir, tmp_path, marker, ordered):
@@ -418,3 +420,18 @@ def test_a_walk_resume_plan_binds_the_policy_digest(data_dir, tmp_path, marker, 
     rid = latest_doc()["run_id"]
     assert main(["crawl", "resume", "--run-id", rid, *fix(d)]) == 0
     assert plans[-1]["policy_digest"] == policy.DEFAULT.digest() and plans[-1]["order"] == "unordered"
+
+
+def test_a_challenge_on_the_last_allowed_get_is_still_a_challenge_stop(data_dir, tmp_path, marker):
+    """The GET that reaches the ceiling is marked no-retry; a challenge on it is still exit 5 (not a failed
+    page), and the walk, its ceiling spent, is not resumed."""
+    d = site(tmp_path, REF)
+    urls = json.loads((d / "urls.json").read_text())
+    (d / "urls.json").write_text(json.dumps(urls | {P(2): {"file": "walk-2.html", "status": 403}}))
+    assert crawl_lists(d, "--mode", "frontier", "--max-pages", "2") == crawl.EXIT_CHALLENGE
+    assert list_gets() == [P(1), P(2)]
+    doc = latest_doc()
+    assert doc["list"]["settled"] == 2 and doc["list"].get("status") != "failed" and doc["challenges"] == 1
+    FixtureHttpClient.log.clear()
+    assert main(["crawl", "resume", "--run-id", doc["run_id"], *fix(d)]) == crawl.EXIT_INCOMPLETE
+    assert list_gets() == []

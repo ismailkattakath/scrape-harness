@@ -281,12 +281,15 @@ def _ceiling_gap(job: crawl.Run, lst: dict) -> dict:
     it (since_ref null). A frontier whose reference still has an open GAP keeps that GAP's origin (since_ref and
     opened_by: the list past it has been unread since then, not since this reference) and the smaller
     after_page; only a reference with no GAP (a census that ENDED, an anchor on one) starts a new one from it."""
-    new = {"after_page": lst["ceiling"], "since_ref": None, "opened_by": job.doc["run_id"]}
+    # after the last page READ (pages 1..pages_read, contiguous): the ceiling counts GETs, and a retry or a GET a
+    # challenge handed back spends one without reading a page
+    last = lst.get("pages_read") or lst["ceiling"]
+    new = {"after_page": last, "since_ref": None, "opened_by": job.doc["run_id"]}
     if lst["mode"] != "frontier":
         return new
     ref = next((d for d in crawl.run_docs() if d["run_id"] == lst.get("ref_crawl_id")), None)
     if old := ((ref or {}).get("list") or {}).get("gap"):
-        return old | {"after_page": min(old["after_page"], lst["ceiling"])}
+        return old | {"after_page": min(old["after_page"], last)}
     return new | {"since_ref": lst.get("ref_crawl_id")}
 
 

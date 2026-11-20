@@ -483,7 +483,9 @@ where today's list runs into what the reference crawl already read.
   followed by new ids, or by old content out of order (the inversion check);
   an ad pushed across a page boundary was seen earlier in this walk.
 - **The GAP.** A walk that hits its ceiling records `list.gap{after_page,
-  since_ref, opened_by}`: the bumps past its ceiling, back to its reference
+  since_ref, opened_by}`, `after_page` = the last page it read (the ceiling
+  counts GETs, so a retry spends one without reading a page): the bumps past
+  it, back to its reference
   (`since_ref` null in a bootstrap, and for a census, which has no reference),
   were never read. A frontier whose reference still has an open GAP keeps that
   GAP's `since_ref` and `opened_by` (the oldest unread origin) and the smaller
