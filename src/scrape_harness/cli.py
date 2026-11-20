@@ -2079,6 +2079,17 @@ def parser() -> argparse.ArgumentParser:
                 help=f"confirm the {st.name} step's paid count ({st.count_field} from its --dry-run); 0 needs none",
             )
     rf.add_argument(
+        "--proxy-only",
+        metavar="TEXT",
+        help="a new plan picks the ONE configured [crawl.proxy] url containing TEXT (else refuse); the plan signs it",
+    )
+    rf.add_argument(
+        "--proxy-exclude",
+        action="append",
+        metavar="TEXT",
+        help="a new plan never picks a [crawl.proxy] url containing TEXT (repeatable); a resume keeps its proxy",
+    )
+    rf.add_argument(
         "--abandon", action="store_true", help="end the unfinished refresh run and spend its approval"
     )
     rf.add_argument(

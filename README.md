@@ -132,6 +132,16 @@ approval. It is a **strict chain**: a failed step stops every step after it.
   spent, and fetch-ads never runs on a list read that cannot be trusted.
 - Inside a refresh, "fresh" means sighted by a list step of **this** refresh
   that passed.
+- **Which proxy.** With several `[crawl.proxy]` urls, a new plan picks one
+  and signs it. `--proxy-only TEXT` makes it pick the one url containing
+  TEXT. `--proxy-exclude TEXT` (repeatable) never picks a url containing
+  TEXT. Both work as they do on `crawl-lists` and `probe robots`.
+  - `refresh` refuses, before any plan is saved, when the flags leave no url
+    or `--proxy-only` matches more or less than one.
+  - The bounds sign the chosen url, not the flags. A plan without them
+    hashes as before.
+  - A live approval of an excluded url is not used.
+  - A resume keeps the proxy its approval signed, whatever the flags say.
 - The run card has a line per walk step: its mode, its ceiling and what it
   passes on (a frontier's reference and open GAP too).
 - The end summary shows each list step's `list{}`, with a walk's mode, pages

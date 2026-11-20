@@ -38,6 +38,13 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   present or missing, by name only. No value or length is ever printed. It
   also checks the approval signers file, the DATA root, and the site's
   cooldown and breaker latch. `preflight refresh` checks every refresh step.
+- `<cli> refresh --proxy-only TEXT` and `--proxy-exclude TEXT` (repeatable):
+  which `[crawl.proxy]` url a new refresh plan picks, with the same rules as
+  `crawl-lists` and `probe robots`. The bounds sign the chosen url as
+  before, never the flags, so a plan without them hashes as it did (pinned
+  by a literal-hash test). `refresh` refuses, before any plan is saved, when
+  the flags leave no url or `--proxy-only` does not match exactly one. A live
+  approval of an excluded url is not used. A resume keeps its signed proxy.
   `--json` prints one `preflight.v1` object; the default is a short table.
   `--egress` adds the egress check, one request to the trace endpoint. It is
   off by default, so a preflight sends nothing. Exit 0 when all pass, 2 when

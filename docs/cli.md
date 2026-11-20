@@ -252,6 +252,8 @@ Handled before parsing, so not in the tables: `examplesite plan <command> ...` (
 | `--approve-network` | flag |  | the operator approved THIS refresh |
 | `--dry-run` | flag |  | print the run card and the bounds; nothing is sent or saved |
 | `--max-ad-requests` | value |  | the most ad pages in all (default: the fetch-ads step's own cap) |
+| `--proxy-exclude` | value |  | a new plan never picks a [crawl.proxy] url containing TEXT (repeatable); a resume keeps its proxy |
+| `--proxy-only` | value |  | a new plan picks the ONE configured [crawl.proxy] url containing TEXT (else refuse); the plan signs it |
 | `--ttl` | value |  | the bounded approval's lifetime (default 12h, max 24h) |
 
 ### `reparse`

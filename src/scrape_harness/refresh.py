@@ -30,6 +30,12 @@ A walk step (--mode walk|frontier) enters a refresh only when its source declare
 Migration step 5): without the site's end marker a walk can never reach a positive END, so build_bounds
 refuses it (exit 2) before any plan is saved or signed.
 
+`--proxy-only TEXT` and `--proxy-exclude TEXT` (repeatable) choose which configured [crawl.proxy] url a NEW
+plan picks, as crawl-lists' and `probe robots`' do: --proxy-only keeps the one url containing TEXT (exactly one,
+or refuse), --proxy-exclude never keeps a url containing TEXT; nothing left refuses, before any plan is saved.
+The bounds sign the chosen url as before, never the flags, so a plan without them hashes as it did. A live
+approval of an excluded proxy is not used. A resume keeps its signed proxy whatever the flags say.
+
 A step whose pipeline.toml entry declares secrets_env needs each named env var set and non-empty: refresh checks
 them first (preflight.secret_gaps, names only) and refuses (exit 2) before any plan is saved, an approval
 claimed or spent, or a step run; `--dry-run` prints the same warning and goes on.
@@ -65,6 +71,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import dataclasses
 import fcntl
 import json
 import os
@@ -338,12 +345,40 @@ def _needs_min_pages(ns: argparse.Namespace) -> None:
         raise SystemExit(cli.EXIT_CONTRACT)
 
 
-def pick_proxy(bounds: dict, proxies: tuple[str, ...]) -> dict:
-    """With several proxies configured, a new plan picks ONE ([crawl.proxy] choice); the signature binds it."""
+def allowed_proxies(
+    proxies: tuple[str, ...], only: str | None = None, exclude: list[str] | tuple[str, ...] | None = ()
+) -> tuple[str, ...] | None:
+    """The configured urls a NEW plan may pick under --proxy-only / --proxy-exclude, or None when neither is set
+    (the pick is then exactly as before). The same rules as crawl-lists and `probe robots`: --proxy-only keeps
+    the ONE url containing TEXT, --proxy-exclude drops every url containing any TEXT. Refuses when they leave
+    no url, or --proxy-only matches not exactly one."""
+    exclude = tuple(exclude or ())
+    if not only and not exclude:
+        return None
+    keep = proxies
+    if only:
+        keep = tuple(u for u in proxies if only in u)
+        if len(keep) != 1:
+            raise SystemExit(f"--proxy-only {only} matches {len(keep)} configured proxies, not 1")
+    keep = tuple(u for u in keep if not any(x in u for x in exclude))
+    if not keep:
+        flags = " ".join(
+            [*([f"--proxy-only {only}"] if only else []), *(f"--proxy-exclude {x}" for x in exclude)]
+        )
+        raise SystemExit(f"{flags} leaves no proxy of {len(proxies)}")
+    return keep
+
+
+def pick_proxy(bounds: dict, proxies: tuple[str, ...], allowed: tuple[str, ...] | None = None) -> dict:
+    """With several proxies configured, a new plan picks ONE ([crawl.proxy] choice) among `allowed` (all when
+    None); the signature binds it. With one configured, build_bounds already set it (allowed_proxies kept it)."""
     if len(proxies) > 1:
         from . import proxy
 
-        bounds = bounds | {"proxy": proxy.choose(proxy.proxy_set())}
+        ps = proxy.proxy_set()
+        if allowed is not None:
+            ps = dataclasses.replace(ps, urls=allowed)
+        bounds = bounds | {"proxy": proxy.choose(ps)}
     return bounds
 
 
@@ -740,7 +775,11 @@ def _cmd(args: argparse.Namespace, stack: contextlib.ExitStack) -> int:
             return stop.code
     proxies = configured_proxies() if networked else ()
     core = approvals.bounds_core(bounds, proxies)
+    picking = bool(getattr(args, "proxy_only", None) or getattr(args, "proxy_exclude", None))
     if st:
+        if picking:
+            print(f"note: refresh run {st['run_id']} resumes and keeps its signed proxy; --proxy-only and "
+                  "--proxy-exclude choose only a new plan's", file=sys.stderr)  # fmt: skip
         a = approvals.bounded_record(st["approval_id"])
         if why := approvals.bounded_status(st["approval_id"]):
             _spend(st, f"the approval is {why}")
@@ -754,12 +793,17 @@ def _cmd(args: argparse.Namespace, stack: contextlib.ExitStack) -> int:
             return approvals.EXIT_UNAPPROVED
         bounds = a["bounds"]
     else:
+        # Before any plan is saved or approval claimed: the flags pick among the configured urls, or refuse.
+        allowed = allowed_proxies(
+            proxies, getattr(args, "proxy_only", None), getattr(args, "proxy_exclude", None)
+        )
         claim = stack.enter_context(contextlib.ExitStack())
         claim.enter_context(locked(None))  # until this new run's state (and its own lock) exist
         claimed = {s["approval_id"] for s in states()}
-        live = [a for a in approvals.bounded_live(core, proxies) if a["approval_id"] not in claimed]
+        live = [a for a in approvals.bounded_live(core, proxies) if a["approval_id"] not in claimed
+                and (allowed is None or a["bounds"].get("proxy") in allowed)]  # fmt: skip
         if not live:
-            bounds = pick_proxy(bounds, proxies)
+            bounds = pick_proxy(bounds, proxies, allowed)
             if args.dry_run:
                 _card(
                     bounds,
