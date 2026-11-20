@@ -22,6 +22,7 @@ from pathlib import Path
 
 from . import (
     approvals,
+    awake,
     breaker,
     contracts,
     crawl,
@@ -47,6 +48,7 @@ def need_network(args: argparse.Namespace, plugin: object, what: str) -> None:
     if not getattr(plugin, "network", True):
         return
     if getattr(args, "approve_network", False) or pipeline.knob("NETWORK_APPROVED") == "1":
+        awake.hold()  # an approved run: idle sleep must not freeze it mid-crawl
         return
     sys.stderr.write(
         f"refusing: {what} touches the network. Re-run with --approve-network (or {pipeline.knob_name('NETWORK_APPROVED')}=1)\n"

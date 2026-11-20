@@ -28,6 +28,7 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
 
 ### Added
 
+- An approved networked run keeps the Mac awake until it exits (`awake.hold()`: `caffeinate -i -w <pid>`, called by `need_network` and `refresh` once the approval is checked). A refresh on 2026-11-20 took 2 h 40 min for a 1 h plan because idle sleep froze it about 96 min. No-op off macOS; opt out with `<PREFIX>_NO_CAFFEINATE=1`.
 - Hook tests for the plugin's agent-contract gates (plugin 1.3.0), against
   the real CLI: the run-steward's and pipeline-engineer's answers pass when
   valid and block when invalid. They skip while the pinned plugin is older.

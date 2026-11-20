@@ -830,6 +830,9 @@ def _cmd(args: argparse.Namespace, stack: contextlib.ExitStack) -> int:
         print(f"refusing: this refresh touches the network. Re-run with --approve-network (or "
               f"{pipeline.knob_name('NETWORK_APPROVED')}=1) only when the operator has approved it.", file=sys.stderr)  # fmt: skip
         return EXIT_NETWORK
+    from . import awake
+
+    awake.hold()  # the whole chain, steps included: idle sleep froze a refresh ~96 min (2026-11-20)
     if st is None:
         if a["approval_id"] in {s["approval_id"] for s in states()}:
             raise Busy(f"approval {a['approval_id']} was just claimed by another refresh run")
