@@ -1873,6 +1873,13 @@ def cmd_cli_spec(args: argparse.Namespace) -> int:
     return clispec.cmd(args)
 
 
+def cmd_preflight(args: argparse.Namespace) -> int:
+    """What a run needs, before the approval (preflight.py): secrets by name, signers, cooldown, latch."""
+    from . import preflight
+
+    return preflight.cmd(args)
+
+
 def cmd_claude_settings(args: argparse.Namespace) -> int:
     """Render the project's .claude/settings.json from pipeline.toml (--write), or check it (default)."""
     from . import claude_settings
@@ -2051,7 +2058,8 @@ def parser() -> argparse.ArgumentParser:
         help="the ONE on-demand chain ([crawl.refresh] steps, by doit) under ONE bounded Touch ID approval",
         description=(refresh.__doc__ or "").split("\n\n")[0],
         epilog="Without a live approval it prints the plan (bounds + plan_hash) and exits 10, sending nothing; "
-        "`approve <plan_hash>` signs it. Exit codes: 0 complete; 10 not approved, or already running; 3 a bound exceeded, a paid "
+        "`approve <plan_hash>` signs it. Exit codes: 0 complete; 2 a step's secrets_env var is unset (nothing planned or "
+        "spent; see `preflight refresh`); 10 not approved, or already running; 3 a bound exceeded, a paid "
         "count not confirmed, or --approve-network missing; otherwise the failing step's own code (5/6 end "
         "the refresh for good; the others resume with the same command, but a site step's resume counts its "
         "ceiling again, so it fits only if the bounds leave that headroom).",
@@ -2077,6 +2085,26 @@ def parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="print the run card and the bounds; nothing is sent or saved"
     )
     rf.set_defaults(fn=refresh.cmd)
+    pf = sub.add_parser(
+        "preflight",
+        help="before an approval: the secret env vars a command needs (by NAME, present/missing), the signers "
+        "file, the site's cooldown and breaker latch; exit 0 ok, 2 something missing (offline)",
+        epilog="`preflight refresh` checks every [crawl.refresh] step. --json and --egress are preflight's own "
+        "wherever they appear. No value or length of a secret is ever printed.",
+    )
+    pf.add_argument(
+        "command",
+        nargs=argparse.REMAINDER,
+        metavar="COMMAND ...",
+        help="`refresh`, or a command and its args",
+    )
+    pf.add_argument("--json", action="store_true", help="print one preflight.v1 object instead of the table")
+    pf.add_argument(
+        "--egress",
+        action="store_true",
+        help="also run the egress preflight (ONE request to the trace endpoint, never the site); default off",
+    )
+    pf.set_defaults(fn=cmd_preflight)
     # `run` is handled before parsing (main); this entry only lists it in --help
     sub.add_parser(
         "run", help="the declared stages as doit tasks: `run [doit args] [-- args for networked stages]`"

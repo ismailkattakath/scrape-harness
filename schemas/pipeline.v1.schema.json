@@ -171,6 +171,12 @@
           "description": "Only the operator runs it (the hook asks, never allows silently).",
           "type": "boolean"
         },
+        "secrets_env": {
+          "description": "The env var NAMES this command needs to run (e.g. a paid API key or a database DSN). `<cli> preflight` and `<cli> refresh` check each one is set and non-empty, by name only, before any approval; a value is never read out or printed.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
+        },
         "inputs": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
         "outputs": { "type": "array", "items": { "$ref": "#/$defs/entry" } }
       }

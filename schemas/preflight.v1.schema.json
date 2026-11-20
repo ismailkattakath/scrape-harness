@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "preflight.v1.schema.json",
+  "title": "preflight.v1",
+  "description": "`<cli> preflight <command ...>`: what a run needs, checked before the operator's approval. A secret is reported by its env var NAME and PRESENT or MISSING only: no row carries its value or its length.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "command", "checked_at", "ok", "missing", "checks"],
+  "properties": {
+    "schema": { "const": "preflight.v1" },
+    "command": { "description": "The checked command (`refresh`: every declared [crawl.refresh] step).", "type": "string", "minLength": 1 },
+    "checked_at": { "type": "string", "format": "date-time" },
+    "ok": { "description": "Every check passed (exit 0); false exits 2.", "type": "boolean" },
+    "missing": { "description": "The name of each failing check, in check order, once.", "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+    "checks": { "type": "array", "items": { "$ref": "#/$defs/check" } }
+  },
+  "$defs": {
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name", "status"],
+      "properties": {
+        "kind": { "enum": ["secret_env", "signers", "data_root", "cooldown", "breaker", "egress"] },
+        "name": { "description": "An env var name (secret_env, signers, data_root), a site (cooldown, breaker) or `egress`.", "type": "string", "minLength": 1 },
+        "status": { "enum": ["present", "missing", "ok", "blocked", "skipped"] },
+        "needed_by": { "description": "secret_env: the declared commands that need it.", "type": "array", "items": { "type": "string" } },
+        "detail": { "description": "Why it failed, or what was seen (a cooldown's end, the egress country). Never on a secret_env row.", "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "secret_env" } } },
+          "then": { "required": ["needed_by"], "not": { "required": ["detail"] }, "properties": { "status": { "enum": ["present", "missing"] }, "name": { "pattern": "^[A-Z][A-Z0-9_]*$" } } },
+          "else": { "not": { "required": ["needed_by"] }, "properties": { "status": { "enum": ["ok", "missing", "blocked", "skipped"] } } }
+        }
+      ]
+    }
+  }
+}

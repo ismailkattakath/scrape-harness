@@ -27,6 +27,7 @@ REF = EXAMPLE / "schemas" / "examples"
         ("refresh.v1", EXAMPLES / "refresh.example.json"),
         ("list_snapshot.v1", EXAMPLES / "list_snapshot.example.json"),
         ("cli.v1", EXAMPLES / "cli.example.json"),
+        ("preflight.v1", EXAMPLES / "preflight.example.json"),
         ("listing.v1", REF / "listing.example.json"),  # a consumer's schemas, via add_schema_dir
         ("observation.v1", REF / "observation.example.json"),
     ],
@@ -107,6 +108,7 @@ def test_the_core_ships_only_its_own_contracts():
             "incident.v1",
             "list_snapshot.v1",
             "pipeline.v1",
+            "preflight.v1",
             "refresh.v1",
             "run.v1",
             "sample.v1",

@@ -129,6 +129,9 @@ outputs = []
 # paid_exempt = "<why>". The example has no paid command; a consumer's geocode would read:
 #   {name = "geocode", paid_gate = {count_field = "pending"}},
 #   {name = "export-db", args = ["--out", "DATA:export"], paid_exempt = "uploads our own rows; no metered API"},
+# A command that needs a secret env var declares its NAME on its [[stages]] or [[utilities]] entry, e.g.
+# `secrets_env = ["EX_API_KEY"]`; `examplesite preflight refresh` and `refresh` itself check it is set before
+# any approval (presence only, never the value).
 
 [crawl.refresh]
 steps = [

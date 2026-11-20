@@ -1,0 +1,15 @@
+{
+  "schema": "preflight.v1",
+  "command": "refresh",
+  "checked_at": "2026-01-01T00:00:00Z",
+  "ok": false,
+  "missing": ["EX_API_KEY"],
+  "checks": [
+    { "kind": "secret_env", "name": "EX_API_KEY", "status": "missing", "needed_by": ["geocode"] },
+    { "kind": "signers", "name": "EX_APPROVAL_SIGNERS", "status": "ok" },
+    { "kind": "data_root", "name": "EXAMPLE_DATA", "status": "ok" },
+    { "kind": "cooldown", "name": "example.invalid", "status": "ok" },
+    { "kind": "breaker", "name": "example.invalid", "status": "ok" },
+    { "kind": "egress", "name": "egress", "status": "skipped", "detail": "not asked (--egress)" }
+  ]
+}

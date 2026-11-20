@@ -30,6 +30,10 @@ A walk step (--mode walk|frontier) enters a refresh only when its source declare
 Migration step 5): without the site's end marker a walk can never reach a positive END, so build_bounds
 refuses it (exit 2) before any plan is saved or signed.
 
+A step whose pipeline.toml entry declares secrets_env needs each named env var set and non-empty: refresh checks
+them first (preflight.secret_gaps, names only) and refuses (exit 2) before any plan is saved, an approval
+claimed or spent, or a step run; `--dry-run` prints the same warning and goes on.
+
 Ends. Complete: the approval is spent. TERMINAL (the approval is spent, the run cannot resume): a bound
 breach (a networked step's exit 3), a challenge or cooldown stop (5/6), a parse or yield stop (14: what the
 site sent cannot be trusted: a step's own exit 14, a breaker trip or latch, or a crawl-lists step that failed
@@ -718,8 +722,17 @@ def _cmd(args: argparse.Namespace, stack: contextlib.ExitStack) -> int:
         _spend(st, "abandoned by the operator (--abandon)")
         _print_summary(st)
         return 0
+    from . import crawl, preflight
+
+    # Before a plan is saved, an approval claimed or spent, or a step run: a declared secret env var that is
+    # unset would stop the chain AFTER the operator's Touch ID (it has). Names only, never values.
+    if gaps := preflight.secret_gaps([s.name for s in pl.refresh]):
+        print(f"refusing: {', '.join(gaps)} {'is' if len(gaps) == 1 else 'are'} not set (needed by a refresh "
+              f"step's secrets_env); nothing was planned, claimed or sent. See `{cli_name} preflight refresh`.",
+              file=sys.stderr)  # fmt: skip
+        if not args.dry_run:
+            return preflight.EXIT_MISSING
     bounds, networked = build_bounds(args.ttl or DEFAULT_TTL, args.max_ad_requests)
-    from . import crawl
 
     if stop := crawl.latch_stop(bounds["site"]):  # before a plan is printed or an approval claimed or spent
         print(str(stop), file=sys.stderr)

@@ -28,6 +28,7 @@ Handled before parsing, so not in the tables: `examplesite plan <command> ...` (
 | `incidents` |  |  | run stops and refusals (STATE/ops/incidents.jsonl): list, ack |
 | `migrate` | utility | none | COPY an old single root into DATA (synced) and STATE (local); never moves |
 | `plugins` |  |  | list registered sources, drivers, variants |
+| `preflight` |  |  | before an approval: the secret env vars a command needs (by NAME, present/missing), the signers file, the site's cooldown and breaker latch; exit 0 ok, 2 something missing (offline) |
 | `probe` |  |  | one-request checks of the site |
 | `probe robots` | utility | site | ONE robots.txt GET (no retry) after the egress preflight: clean or not |
 | `refresh` |  |  | the ONE on-demand chain ([crawl.refresh] steps, by doit) under ONE bounded Touch ID approval |
@@ -218,6 +219,14 @@ Handled before parsing, so not in the tables: `examplesite plan <command> ...` (
 | `--from` | value |  | the old root (default: $EXAMPLE_DATA) |
 | `--to-data` (required) | value |  |  |
 | `--to-state` (required) | value |  |  |
+
+### `preflight`
+
+| Argument | Value | Default | Help |
+|---|---|---|---|
+| `COMMAND ...` | value |  | `refresh`, or a command and its args |
+| `--egress` | flag |  | also run the egress preflight (ONE request to the trace endpoint, never the site); default off |
+| `--json` | flag |  | print one preflight.v1 object instead of the table |
 
 ### `probe robots`
 

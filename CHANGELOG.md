@@ -33,6 +33,21 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   network flags as a public helper, so a plug-in command reuses them instead
   of declaring its own. The core commands use the same helper; their flags,
   defaults, help and plan hashes are unchanged.
+- `<cli> preflight <command ...>`: what a run needs, checked before the
+  operator's Touch ID. It reports each secret env var a command needs as
+  present or missing, by name only. No value or length is ever printed. It
+  also checks the approval signers file, the DATA root, and the site's
+  cooldown and breaker latch. `preflight refresh` checks every refresh step.
+  `--json` prints one `preflight.v1` object; the default is a short table.
+  `--egress` adds the egress check, one request to the trace endpoint. It is
+  off by default, so a preflight sends nothing. Exit 0 when all pass, 2 when
+  any fails; `missing` names each one. See [docs/preflight.md](docs/preflight.md).
+- `secrets_env = ["NAME", ...]` on a stage or utility (pipeline.v1,
+  additive): the env var names that command needs. Absent means none.
+- `refresh` checks its steps' `secrets_env` first. When one is unset or
+  empty, it refuses with exit 2 and names it. Nothing is planned, claimed,
+  spent or sent. `refresh --dry-run` prints the same warning and goes on.
+  A refresh that declares no `secrets_env` behaves as before.
 
 - `crawl-lists --snapshot`: each answered list page is saved as gzip under
   `raw/lists/<site>/<crawl_id>/<page>.html.gz`, with a `list_snapshot.v1`

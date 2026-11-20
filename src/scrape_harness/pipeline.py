@@ -70,6 +70,7 @@ class Command:
     inputs: tuple[tuple[str, str], ...]  # (root, template)
     outputs: tuple[tuple[str, str], ...]
     args: tuple[str, ...] = ()
+    secrets_env: tuple[str, ...] = ()  # env var NAMES the command needs (preflight checks presence only)
 
 
 @dataclass(frozen=True)
@@ -182,6 +183,7 @@ def parse(doc: dict, path: Path) -> Pipeline:
             _entries(c["inputs"], groups, f"{path}: {c['name']}.inputs"),
             _entries(c["outputs"], groups, f"{path}: {c['name']}.outputs"),
             tuple(c.get("args", ())),
+            secrets_env=tuple(c.get("secrets_env", ())),
         )
 
     stages, utilities = tuple(cmd(c) for c in doc["stages"]), tuple(cmd(c) for c in doc["utilities"])
