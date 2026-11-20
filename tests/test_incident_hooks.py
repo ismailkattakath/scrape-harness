@@ -8,9 +8,9 @@ import sys
 import time
 
 from conftest import EXAMPLES, PLUGIN, ROOT
+from test_hooks import _li_on_path
 
 from scrape_harness import incidents
-from test_hooks import _li_on_path
 
 GUARD = PLUGIN / "hooks" / "guard.py"
 
