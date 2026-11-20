@@ -1,0 +1,13 @@
+{
+  "schema": "diagnosis.v1",
+  "symptom": "fetch-ads wrote listings with no price since the last run",
+  "root_cause": "the price selector still matches the old class, which the saved snapshots no longer carry",
+  "evidence": [
+    { "file": "examples/example_site/source.py", "line": 42, "quote": "price = card.select_one(\".result__price\")" },
+    { "file": "DATA:runs/2026-01-16t07-00-00z-fetch-ads.json", "quote": "\"parse_failed\": 12" }
+  ],
+  "fix": { "change": "read the price from the new class, then reparse the saved snapshots offline", "files": ["examples/example_site/source.py", "tests/test_example_source.py"] },
+  "tests": ["test_price_is_read_from_the_new_class"],
+  "confidence": "high",
+  "blocked_on": null
+}

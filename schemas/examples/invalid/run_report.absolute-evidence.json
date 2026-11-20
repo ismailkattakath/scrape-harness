@@ -1,0 +1,11 @@
+{
+  "schema": "run_report.v1",
+  "run_ids": ["2026-01-16T06:00:00Z-crawl-lists"],
+  "state": "running",
+  "exit_code": null,
+  "stop_reason": null,
+  "counts": { "list_pages": 1 },
+  "open_incidents": [],
+  "next_action": "none",
+  "evidence": ["/var/data/runs/2026-01-16t06-00-00z-crawl-lists.log.jsonl"]
+}

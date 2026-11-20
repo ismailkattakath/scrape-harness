@@ -1,0 +1,10 @@
+{
+  "schema": "diagnosis.v1",
+  "symptom": "a field went missing",
+  "root_cause": "the selector changed",
+  "evidence": [{ "file": "examples/example_site/source.py", "quote": "card.select_one" }],
+  "fix": null,
+  "tests": [],
+  "confidence": "medium",
+  "blocked_on": "someone_else"
+}

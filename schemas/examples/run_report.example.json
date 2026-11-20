@@ -1,0 +1,11 @@
+{
+  "schema": "run_report.v1",
+  "run_ids": ["2026-01-16T06:00:00Z-crawl-lists"],
+  "state": "stopped",
+  "exit_code": 5,
+  "stop_reason": "challenge: an interstitial on list page 2",
+  "counts": { "list_pages": 2, "ad_pages": 0, "robots": 1, "challenges": 1 },
+  "open_incidents": ["INC-20260116T060500Z-a1b2c3"],
+  "next_action": "operator_clear_gate",
+  "evidence": ["DATA:runs/2026-01-16t06-00-00z-crawl-lists.json", "DATA:runs/2026-01-16t06-00-00z-crawl-lists.log.jsonl"]
+}

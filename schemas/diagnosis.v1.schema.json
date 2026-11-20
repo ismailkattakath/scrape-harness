@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "diagnosis.v1.schema.json",
+  "title": "diagnosis.v1",
+  "description": "The pipeline-engineer agent's final answer: what broke, why, the evidence quoted from files, and the proposed fix with its tests. A path is repo-relative, or DATA:/STATE: relative to that root; never absolute.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "symptom", "root_cause", "evidence", "fix", "tests", "confidence", "blocked_on"],
+  "properties": {
+    "schema": { "const": "diagnosis.v1" },
+    "symptom": { "description": "What was observed (a run id and exit code, a missing field).", "type": "string", "minLength": 1 },
+    "root_cause": { "type": "string", "minLength": 1 },
+    "evidence": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/evidence" } },
+    "fix": {
+      "description": "The proposed change and the files it touches; null only when blocked.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["change", "files"],
+          "properties": {
+            "change": { "type": "string", "minLength": 1 },
+            "files": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/path" } }
+          }
+        }
+      ]
+    },
+    "tests": { "description": "The test names that prove the fix (each fails without it).", "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "confidence": { "enum": ["low", "medium", "high"] },
+    "blocked_on": {
+      "description": "null, or who or what the next step waits for.",
+      "enum": [null, "operator_approval", "operator_clear_gate", "operator_decision", "cooldown", "missing_evidence", "upstream_change"]
+    }
+  },
+  "$defs": {
+    "path": {
+      "description": "repo-relative, or DATA:/STATE: relative to that root: no leading / or ~, no .. segment.",
+      "type": "string",
+      "pattern": "^(?:(?:DATA|STATE):(?![/~])|(?![/~]|(?:DATA|STATE):))(?!(.*/)?\\.\\.(/|$))\\S+$"
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "quote"],
+      "properties": {
+        "file": { "$ref": "#/$defs/path" },
+        "line": { "type": "integer", "minimum": 1 },
+        "quote": { "description": "The exact text read there, at most 200 characters.", "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    }
+  },
+  "if": { "properties": { "blocked_on": { "const": null } } },
+  "then": { "properties": { "fix": { "type": "object" } } }
+}

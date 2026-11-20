@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "run_report.v1.schema.json",
+  "title": "run_report.v1",
+  "description": "The run-steward agent's final answer: one object per report. Every number is read from a run record, never estimated; every evidence ref is a DATA: or STATE: path relative to that root, never an absolute path.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "run_ids", "state", "exit_code", "stop_reason", "counts", "open_incidents", "next_action", "evidence"],
+  "properties": {
+    "schema": { "const": "run_report.v1" },
+    "run_ids": { "description": "The run(s) reported on (run.v1 run_id).", "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "state": { "description": "running; finished (exit 0); stopped (a stop during the run); refused (it never started: no approval, egress, cooldown).", "enum": ["running", "finished", "stopped", "refused"] },
+    "exit_code": { "description": "The CLI exit code; null while running, or when a finished run's code was not seen.", "type": ["integer", "null"], "minimum": 0 },
+    "stop_reason": { "description": "The stop or refusal reason as the run record or the CLI states it; null unless stopped or refused.", "type": ["string", "null"] },
+    "counts": { "description": "Numbers read from the run record (e.g. requests by kind, challenges), by name.", "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+    "open_incidents": { "description": "Open incident ids (incident.v1), in the order listed.", "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^INC-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}$" } },
+    "next_action": { "description": "The one next step (the runbook-stop skill names it). None of them retries a stopped run.", "enum": ["none", "wait", "resume", "approve", "operator_clear_gate", "wait_cooldown", "fix_egress", "investigate"] },
+    "evidence": { "description": "The files the report was read from.", "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/root_ref" } }
+  },
+  "$defs": {
+    "root_ref": { "description": "ROOT:relative/path, as pipeline.toml writes I/O: no leading / and no .. segment.", "type": "string", "pattern": "^(DATA|STATE):(?![/~])(?!(.*/)?\\.\\.(/|$))\\S+$" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "state": { "const": "running" } } },
+      "then": { "properties": { "exit_code": { "type": "null" }, "stop_reason": { "type": "null" } } }
+    },
+    {
+      "if": { "properties": { "state": { "const": "finished" } } },
+      "then": { "properties": { "exit_code": { "enum": [0, null] }, "stop_reason": { "type": "null" } } }
+    },
+    {
+      "if": { "properties": { "state": { "enum": ["stopped", "refused"] } } },
+      "then": { "properties": { "exit_code": { "type": "integer", "minimum": 1 }, "stop_reason": { "type": "string", "minLength": 1 } } }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "schema": "diagnosis.v1",
+  "symptom": "a field went missing",
+  "root_cause": "the selector changed",
+  "evidence": [{ "file": "examples/example_site/source.py", "line": 1, "quote": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" }],
+  "fix": { "change": "fix it", "files": ["examples/example_site/source.py"] },
+  "tests": [],
+  "confidence": "low",
+  "blocked_on": null
+}

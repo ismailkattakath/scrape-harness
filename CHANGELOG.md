@@ -20,6 +20,17 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
 
 ### Added
 
+- Two agent-answer contracts, strict (no unknown key):
+  - `run_report.v1` is the run-steward's final answer: the run ids, a state
+    (running, finished, stopped or refused), the exit code and stop reason,
+    counts read from the run record, open incident ids, one `next_action`
+    from a closed list, and evidence refs. A ref is `DATA:` or `STATE:` plus
+    a relative path, never an absolute one.
+  - `diagnosis.v1` is the pipeline-engineer's final answer: symptom, root
+    cause, evidence (file, optional line, a quote of at most 200 characters),
+    the proposed fix and its files, test names, a confidence, and
+    `blocked_on` (null or a closed list). A fix may be null only when blocked.
+  - `<cli> validate run_report.v1 FILE` and `diagnosis.v1` check an answer.
 - `<cli> cli spec`: the whole command tree as JSONL, one `cli.v1` row per
   command, positional and option. Consumer plug-in commands are included. A
   command row carries its `pipeline.toml` entry: stage or utility, network

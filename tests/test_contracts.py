@@ -28,6 +28,8 @@ REF = EXAMPLE / "schemas" / "examples"
         ("list_snapshot.v1", EXAMPLES / "list_snapshot.example.json"),
         ("cli.v1", EXAMPLES / "cli.example.json"),
         ("preflight.v1", EXAMPLES / "preflight.example.json"),
+        ("run_report.v1", EXAMPLES / "run_report.example.json"),
+        ("diagnosis.v1", EXAMPLES / "diagnosis.example.json"),
         ("listing.v1", REF / "listing.example.json"),  # a consumer's schemas, via add_schema_dir
         ("observation.v1", REF / "observation.example.json"),
     ],
@@ -103,6 +105,7 @@ def test_the_core_ships_only_its_own_contracts():
             "ab.v1",
             "approval.v2",
             "cli.v1",
+            "diagnosis.v1",
             "event.v1",
             "finding.v1",
             "incident.v1",
@@ -111,6 +114,7 @@ def test_the_core_ships_only_its_own_contracts():
             "preflight.v1",
             "refresh.v1",
             "run.v1",
+            "run_report.v1",
             "sample.v1",
             "status.v1",
         )
@@ -157,3 +161,105 @@ def test_the_sync_fields_round_trip_through_the_store(data_dir):
     old = json.loads((EXAMPLES / "event.example.json").read_text())
     assert store.append("events", [old, new]) == 2
     assert list(store.read("events")) == [old, new]
+
+
+# ── the agents' answers: run_report.v1 (run-steward) and diagnosis.v1 (pipeline-engineer) ────────────
+
+
+def _report(**kw):
+    return json.loads((EXAMPLES / "run_report.example.json").read_text()) | kw
+
+
+def _diagnosis(**kw):
+    return json.loads((EXAMPLES / "diagnosis.example.json").read_text()) | kw
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"state": "running", "exit_code": None, "stop_reason": None, "next_action": "none"},
+        {"state": "finished", "exit_code": 0, "stop_reason": None, "next_action": "none", "open_incidents": []},
+        {"state": "finished", "exit_code": None, "stop_reason": None, "next_action": "none"},
+        {"state": "refused", "exit_code": 10, "stop_reason": "no approval for this plan", "next_action": "approve"},
+        {"state": "stopped", "exit_code": 6, "stop_reason": "cooldown", "next_action": "wait_cooldown"},
+        {"evidence": ["STATE:status.json", "DATA:events.jsonl"]},
+        {"run_ids": ["a-run", "another-run"]},
+    ],
+)
+def test_a_run_report_validates(change):
+    contracts.validate("run_report.v1", _report(**change))
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"state": "running", "exit_code": 5},  # a running run has no exit code yet
+        {"state": "running", "stop_reason": "x", "exit_code": None},
+        {"state": "finished", "exit_code": 5, "stop_reason": None},  # a non-zero exit is a stop
+        {"state": "stopped", "exit_code": 0},  # a stop is a non-zero exit
+        {"state": "stopped", "stop_reason": ""},
+        {"state": "done"},
+        {"next_action": "retry"},  # closed enum: a stop is never retried in a loop
+        {"counts": {"list_pages": -1}},
+        {"counts": {"list_pages": 1.5}},
+        {"open_incidents": ["INC-1"]},
+        {"evidence": ["DATA:../outside.json"]},
+        {"evidence": ["DATA:/abs.json"]},
+        {"evidence": ["runs/x.json"]},  # a ref names its root
+        {"evidence": []},
+        {"run_ids": []},
+        {"extra": 1},
+    ],
+)
+def test_a_malformed_run_report_fails(change):
+    with pytest.raises(contracts.ContractError):
+        contracts.validate("run_report.v1", _report(**change))
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"blocked_on": "operator_approval", "fix": None, "confidence": "low"},
+        {"blocked_on": "operator_decision"},  # blocked with a fix proposed is fine
+        {"evidence": [{"file": "DATA:events.jsonl", "quote": "x" * 200}]},
+        {"evidence": [{"file": "STATE:status.json", "line": 1, "quote": "running"}]},
+        {"tests": []},
+    ],
+)
+def test_a_diagnosis_validates(change):
+    contracts.validate("diagnosis.v1", _diagnosis(**change))
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"fix": None},  # not blocked: a fix is proposed
+        {"confidence": "certain"},
+        {"evidence": []},
+        {"evidence": [{"file": "/abs/source.py", "quote": "x"}]},
+        {"evidence": [{"file": "~/source.py", "quote": "x"}]},
+        {"evidence": [{"file": "../source.py", "quote": "x"}]},
+        {"evidence": [{"file": "DATA:/abs.json", "quote": "x"}]},
+        {"evidence": [{"file": "src/../../x.py", "quote": "x"}]},
+        {"evidence": [{"file": "a.py", "line": 0, "quote": "x"}]},
+        {"evidence": [{"file": "a.py", "quote": "x", "extra": 1}]},
+        {"evidence": [{"file": "a.py"}]},
+        {"fix": {"change": "x", "files": ["/abs.py"]}},
+        {"fix": {"change": "x", "files": [], "extra": 1}},
+        {"symptom": ""},
+        {"extra": 1},
+    ],
+)
+def test_a_malformed_diagnosis_fails(change):
+    with pytest.raises(contracts.ContractError):
+        contracts.validate("diagnosis.v1", _diagnosis(**change))
+
+
+@pytest.mark.parametrize("name", ["run_report", "diagnosis"])
+def test_the_cli_validates_an_agent_answer(name, capsys, tmp_path):
+    from scrape_harness import cli
+
+    good = EXAMPLES / f"{name}.example.json"
+    assert cli.main(["validate", f"{name}.v1", str(good)]) == 0
+    bad = next((EXAMPLES / "invalid").glob(f"{name}.*.json"))
+    assert cli.main(["validate", f"{name}.v1", str(bad)]) != 0
