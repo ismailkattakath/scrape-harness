@@ -63,7 +63,9 @@ them, and the refusal names every one. Then:
 2. Set the data and state roots (outside any repository) in `.envrc.local`.
 3. Run `<cli> claude-settings --write` to render the agent settings from
    `pipeline.toml`.
-4. `nix flake check`.
+4. Run `<cli> claude-md --write` to fill the route table in `CLAUDE.md`. Then
+   uncomment `claudeMd = ./CLAUDE.md;` in `flake.nix` to drift-check it.
+5. `nix flake check`.
 
 [listing-lens](https://github.com/ismailkattakath/listing-lens) is a complete
 consumer: every site specific lives outside its repository, and its tests run

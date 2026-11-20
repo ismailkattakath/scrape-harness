@@ -50,6 +50,17 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
     fallback. A description with no "Use ..." clause refuses.
   - `examples/example_site/CLAUDE.md` is the example's block. Regenerate it
     when the plugin pin moves.
+- `consumerTools` takes `claudeMd` (e.g. `./CLAUDE.md`), opt-in. With
+  `cliPackage`, it adds `checks.claude-md-drift`. The check runs in the
+  sandbox against `plugin`, with no site file. It fails on drift, and it
+  also fails unless a copy with one line changed inside the block exits 1.
+  The example consumer uses it; `checks.claude-md-drift-overlay` runs it
+  with `site_overlay = true`.
+- The CLI wrapper sets `SCRAPE_HARNESS_PLUGIN` by default to the pinned
+  plugin (`packages.plugin`), so `nix run .#<cli> -- claude-md` finds it.
+- The template ships a `CLAUDE.md` with the two markers, and a commented
+  `claudeMd = ./CLAUDE.md;` in its flake. `checks.template-instantiated`
+  fills the block and checks it.
 - `<cli> cli spec`: the whole command tree as JSONL, one `cli.v1` row per
   command, positional and option. Consumer plug-in commands are included. A
   command row carries its `pipeline.toml` entry: stage or utility, network

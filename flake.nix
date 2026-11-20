@@ -211,6 +211,7 @@
           # argument, so going through self.packages would be an infinite recursion
           cliPackage = li pkgs;
           cliSpecDoc = ./docs/cli.md;
+          claudeMd = ./examples/example_site/CLAUDE.md; # checks.claude-md-drift: the example's route block
           pipeline = "${src}/pipeline.toml"; # the example's package embeds none; the TREE copy, so its [plugins] paths resolve
         };
 
@@ -265,6 +266,8 @@
           "--suffix PATH : ${sshKeyToolsFor pkgs}/bin" # ssh-keygen for approvals; a system one wins if present
           # the CLI build's git revision for the run card; a dirty tree says so
           "--set-default ${consumer.env_prefix}_BUILD_REV ${rev}"
+          # the plugin at the pinned marketplace rev (packages.plugin): `<cli> claude-md` routes by it
+          "--set-default SCRAPE_HARNESS_PLUGIN ${self.packages.${pkgs.stdenv.hostPlatform.system}.plugin}"
         ]
         ++ lib.optional (pipeline != null) "--set-default SCRAPE_HARNESS_PIPELINE ${pipeline}";
 
@@ -477,6 +480,12 @@
                 sed -i 's/^FILL-ME = "scrape_harness.cli:main"/tplsite = "scrape_harness.cli:main"/' pyproject.toml
                 if grep -rnE '"FILL-ME"|^FILL-ME ' pipeline.toml src pyproject.toml; then echo "FILL-ME left after filling" >&2; exit 1; fi
                 HOME="$TMPDIR" SCRAPE_HARNESS_PIPELINE="$out/pipeline.toml" python -m scrape_harness.cli claude-settings --write
+                # the template's CLAUDE.md ships the route markers: --write fills them, --check then agrees
+                for mode in --write --check; do
+                  HOME="$TMPDIR" SCRAPE_HARNESS_PIPELINE="$out/pipeline.toml" python -m scrape_harness.cli claude-md "$mode" \
+                    --file "$out/CLAUDE.md" --plugin ${self.packages.${system}.plugin}
+                done
+                grep -q 'skill `scrape-harness:' "$out/CLAUDE.md" || { echo "the template's route block is empty" >&2; exit 1; }
               '';
             in
             ps.buildPythonPackage {
@@ -712,6 +721,23 @@
               cliSpecDoc = ./docs/cli.md;
               pipeline = "${overlaySrc}/pipeline.toml";
             }).checks.cli-spec-drift;
+          # GOES RED WHEN: a site-overlay consumer's route block needs a site file (none exists in the
+          # sandbox) or differs from the plain example's: `claude-md` renders repo-only, like `cli spec`.
+          claude-md-drift-overlay =
+            let
+              overlaySrc = pkgs.runCommandLocal "overlay-consumer-src-md" { } ''
+                cp -r ${src} "$out"; chmod -R u+w "$out"
+                sed -i 's/^\[consumer\]$/[consumer]\nsite_overlay = true/' "$out/pipeline.toml"
+                grep -qx 'site_overlay = true' "$out/pipeline.toml" || { echo "site_overlay was not set" >&2; exit 1; }
+              '';
+            in
+            (self.lib.consumerTools {
+              inherit pkgs consumer;
+              plugin = "${self.packages.${system}.plugin}";
+              cliPackage = self.packages.${system}.default;
+              claudeMd = ./examples/example_site/CLAUDE.md;
+              pipeline = "${overlaySrc}/pipeline.toml";
+            }).checks.claude-md-drift;
           consumer-lib =
             (self.lib.consumerTools {
               inherit pkgs consumer;

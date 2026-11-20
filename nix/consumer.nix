@@ -1,6 +1,7 @@
 # The consumer-facing tools of scrape-harness, as a function of a consumer's pipeline.toml [consumer]
 # table: the env catalogue, env-doctor, leak-gate, public-gate and ship; with cliPackage, the env-loading
-# apps (<cli>, preflight, cli-spec); with cliSpecDoc, checks.cli-spec-drift. The harness builds its own example consumer's
+# apps (<cli>, preflight, cli-spec); with cliSpecDoc, checks.cli-spec-drift; with claudeMd,
+# checks.claude-md-drift. The harness builds its own example consumer's
 # tools with it exactly as a consumer flake does (`scrape-harness.lib.consumerTools`), so there is one copy.
 {
   lib,
@@ -18,6 +19,10 @@
   cliSpecDoc ? null,
   # A pipeline.toml for that check, only for a CLI that does not embed one (the harness's example does not).
   pipeline ? null,
+  # The consumer's CLAUDE.md (e.g. ./CLAUDE.md), with the block `<cli> claude-md --write` fills. Set, with
+  # cliPackage: `checks.claude-md-drift` fails when the block differs from the render against `plugin`
+  # (pass the harness's packages.plugin store path). null: no check.
+  claudeMd ? null,
 }:
 let
   knob = n: "${consumer.env_prefix}_${n}";
@@ -221,23 +226,43 @@ rec {
   }) appPackages;
 
   # Flake checks for the consumer to merge into its `checks` (empty unless opted in).
-  # GOES RED WHEN: the committed cliSpecDoc differs from the built CLI's `cli spec --format md`, or a
-  # mutated copy of it passes (the check that proves the check can fail).
-  checks = lib.optionalAttrs (cliPackage != null && cliSpecDoc != null) {
-    cli-spec-drift = pkgs.runCommandLocal "cli-spec-drift" { } ''
-      ${lib.optionalString (pipeline != null) "export SCRAPE_HARNESS_PIPELINE=${pipeline}"}
-      cd "$TMPDIR"; mkdir -p data state
-      export HOME="$TMPDIR" ${consumer.data_env}="$TMPDIR/data" ${consumer.state_env}="$TMPDIR/state"
-      cli=${lib.getExe' cliPackage consumer.cli}
-      "$cli" cli spec --format md --check ${cliSpecDoc} \
-        || { echo "cli-spec-drift: regenerate it with \`${consumer.cli} cli spec --format md > <the doc>\`" >&2; exit 1; }
-      { cat ${cliSpecDoc}; echo "drift"; } > mutated
-      if "$cli" cli spec --format md --check mutated >/dev/null 2>&1; then
-        echo "cli-spec-drift: a drifted copy passed --check" >&2; exit 1
-      fi
-      touch "$out"
-    '';
-  };
+  # cli-spec-drift GOES RED WHEN: the committed cliSpecDoc differs from the built CLI's `cli spec --format
+  # md`, or a mutated copy of it passes (the check that proves the check can fail).
+  checks =
+    lib.optionalAttrs (cliPackage != null && cliSpecDoc != null) {
+      cli-spec-drift = pkgs.runCommandLocal "cli-spec-drift" { } ''
+        ${lib.optionalString (pipeline != null) "export SCRAPE_HARNESS_PIPELINE=${pipeline}"}
+        cd "$TMPDIR"; mkdir -p data state
+        export HOME="$TMPDIR" ${consumer.data_env}="$TMPDIR/data" ${consumer.state_env}="$TMPDIR/state"
+        cli=${lib.getExe' cliPackage consumer.cli}
+        "$cli" cli spec --format md --check ${cliSpecDoc} \
+          || { echo "cli-spec-drift: regenerate it with \`${consumer.cli} cli spec --format md > <the doc>\`" >&2; exit 1; }
+        { cat ${cliSpecDoc}; echo "drift"; } > mutated
+        if "$cli" cli spec --format md --check mutated >/dev/null 2>&1; then
+          echo "cli-spec-drift: a drifted copy passed --check" >&2; exit 1
+        fi
+        touch "$out"
+      '';
+    }
+    # claude-md-drift GOES RED WHEN: the route block in claudeMd differs from the built CLI's render
+    # (repo-only: no site file is read, and none exists here), or a copy with one line changed INSIDE the
+    # block does not exit 1 (drift), or the check refuses (exit 4: markers, plugin) instead of comparing.
+    // lib.optionalAttrs (cliPackage != null && claudeMd != null) {
+      claude-md-drift = pkgs.runCommandLocal "claude-md-drift" { } ''
+        ${lib.optionalString (pipeline != null) "export SCRAPE_HARNESS_PIPELINE=${pipeline}"}
+        cd "$TMPDIR"; mkdir -p data state
+        export HOME="$TMPDIR" ${consumer.data_env}="$TMPDIR/data" ${consumer.state_env}="$TMPDIR/state"
+        cli=${lib.getExe' cliPackage consumer.cli}
+        md() { "$cli" claude-md --check --plugin ${lib.escapeShellArg plugin} --file "$1"; }
+        rc=0; md ${claudeMd} || rc=$?
+        [ "$rc" = 0 ] || { echo "claude-md-drift: exit $rc; regenerate the block with \`${consumer.cli} claude-md --write\`" >&2; exit 1; }
+        sed '/^<!-- scrape-harness:routes:start -->$/a drift' ${claudeMd} > mutated
+        cmp -s ${claudeMd} mutated && { echo "claude-md-drift: the mutation changed nothing" >&2; exit 1; }
+        rc=0; md mutated >/dev/null 2>&1 || rc=$?
+        [ "$rc" = 1 ] || { echo "claude-md-drift: a drifted block gave exit $rc, not 1" >&2; exit 1; }
+        touch "$out"
+      '';
+    };
   env-doctor = pkgs.writeShellApplication {
     name = "env-doctor";
     text = ''
