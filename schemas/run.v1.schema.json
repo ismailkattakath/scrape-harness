@@ -494,6 +494,7 @@
         "ceiling": {"type": "integer", "minimum": 1, "description": "A walk's signed ceiling: every list GET it may send (--max-pages), the END page included."},
         "min_pages": {"type": "integer", "minimum": 1, "description": "A walk's signed --min-pages: an END with end_page below it is short_census."},
         "pages_read": {"type": "integer", "minimum": 0, "description": "A walk's list pages handled, across every attempt (the END page included)."},
+        "repeats_skipped": {"type": "integer", "minimum": 0, "description": "A walk's cards not written because the walk already kept that ad: a card a bump pushed down from an earlier page, or one listed twice on a page. A walk writes one row per ad."},
         "settled": {"type": "integer", "minimum": 0, "description": "A walk's list GETs sent, across every attempt (retries and GETs a challenge or a crash handed back included), counted before each GET: the ceiling counts these."},
         "snapshot": {
           "type": "object",

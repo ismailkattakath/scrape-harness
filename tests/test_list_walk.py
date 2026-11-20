@@ -505,3 +505,33 @@ def test_a_refresh_walk_step_signs_mode_and_min_pages_and_bounds_max_pages(
     assert "a census walk, at least 2 pages" in approvals.bounded_text(b)
     step = cli._step_doc({"command": "crawl-lists", **lst})  # noqa: SLF001
     assert approvals.list_args(step) == lst and step["list_pages"] == lst["max_pages"]
+
+
+# ── one row per ad per walk: a bump-displaced repeat is not kept again ──────────────────────────────────
+@pytest.mark.parametrize("mode", ["walk", "frontier"])
+def test_a_card_pushed_to_the_next_page_is_kept_once(data_dir, tmp_path, marker, mode):
+    """A bump during the walk pushes a card one page down, so the walk meets it again. Its first sighting
+    (the shallower page) is the crawl's one row; the repeat is counted, never written (one row per
+    (site, ad_id, crawl_id), the consumers' key)."""
+    d = site(tmp_path, [[2000001, 2000002, 2000003], [2000003, 2000004, 2000005]])
+    assert crawl_lists(d, "--mode", mode) == 0
+    doc = the_doc(data_dir)
+    got = rows(doc)
+    assert sorted((o["ad_id"], o["list"]["page"]) for o in got) == [
+        ("2000001", 1), ("2000002", 1), ("2000003", 1), ("2000004", 2), ("2000005", 2),
+    ]  # fmt: skip
+    assert doc["list"]["repeats_skipped"] == 1 and doc["list"]["observations_written"] == 5
+    assert doc["list"]["status"] == "end" and doc["list"]["end_page"] == 2
+
+
+def test_a_repeat_on_the_same_page_is_kept_once(data_dir, tmp_path, marker):
+    d = site(tmp_path, [[2000001, 2000001, 2000002]])
+    assert walk(d) == 0
+    doc = the_doc(data_dir)
+    assert sorted(o["ad_id"] for o in rows(doc)) == ["2000001", "2000002"]
+    assert doc["list"]["repeats_skipped"] == 1
+
+
+def test_a_walk_with_no_repeat_records_zero(data_dir, tmp_path, marker):
+    assert walk(site(tmp_path, THREE)) == 0
+    assert the_doc(data_dir)["list"]["repeats_skipped"] == 0

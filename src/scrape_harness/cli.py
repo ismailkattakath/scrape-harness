@@ -178,7 +178,20 @@ def list_handler(job: crawl.Run, source, max_pages: int):
                 ended(lst, m, "clamped")  # its cards are earlier pages' cards again: none is kept
                 return walked(lst, m)
             frontier = m["mode"] == "frontier"
-            keep(lp.observations, None, None if frontier else 1)
+            # one row per ad per walk (the consumers' (site, ad_id, crawl_id) key): a card a bump pushed down
+            # from an earlier page, or listed twice on this one, is a repeat, counted and never written again.
+            # An id this page already wrote in an earlier attempt (a resume's re-read) is not a repeat: its row
+            # exists, so it is skipped uncounted
+            fresh, here, repeats = [], set(), 0
+            for o in lp.observations:
+                i = o["ad_id"]
+                if i in here or known.get(i, m["page"]) < m["page"]:
+                    repeats += 1
+                elif i not in known:
+                    fresh.append(o)
+                here.add(i)
+            lst["repeats_skipped"] = lst.get("repeats_skipped", 0) + repeats
+            keep(fresh, None, None if frontier else 1)
             for i in ids:
                 known.setdefault(i, m["page"])
             walk_pages[m["page"]] = list(dict.fromkeys(ids))

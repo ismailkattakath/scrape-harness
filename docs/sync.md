@@ -387,6 +387,15 @@ is prefetched.
 | An END with `end_page` below the signed `--min-pages` | `short_census`; terminal, never resumed | 14 |
 | A 0-card page with no END, a bare 404, a failed or robots-blocked page | as for every list read (above) | 14, 5 or 13 |
 
+- **One row per ad per walk.** A walk takes minutes, and a bump during it
+  pushes cards down, so the walk can meet a card again one page deeper. The
+  first sighting
+  (the shallower page) is the crawl's row. A repeat, or a card listed twice on
+  one page, is not written; `list.repeats_skipped` counts it. Consumers key a
+  sighting on `(site, ad_id, crawl_id)`. A page re-read by a resume skips the
+  ids it already wrote, uncounted. The clamp guard still judges every parsed
+  id, and the frontier's candidate window still sees the page as parsed.
+
 - **Signed.** `mode` and `min_pages` join the plan (`run_plan`) and a
   refresh's signed list set (`approvals.LIST_KEYS_IF_SET`) only when set, so a
   plan without them hashes as before. A walk also signs `policy_digest`

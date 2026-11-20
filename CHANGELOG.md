@@ -10,6 +10,14 @@ The version is the one in `pyproject.toml`.
 
 Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
 
+### Fixed
+
+- A list walk (`--mode walk|frontier`) writes one observation per ad. A card a
+  bump pushed down from an earlier page of the same walk, or one listed twice
+  on a page, is counted in `list.repeats_skipped` (run.v1, additive) and not
+  written again. Before this, a consumer keyed on `(site, ad_id, crawl_id)`
+  failed on the repeat.
+
 ### Added
 
 - `crawl-lists --snapshot`: each answered list page is saved as gzip under
