@@ -194,3 +194,48 @@ def test_docs_cli_md_is_in_sync_with_the_tree():
     """docs/cli.md is the example consumer's render; regenerate with
     `examplesite cli spec --format md > docs/cli.md` when a command or flag changes."""
     assert cli.main(["cli", "spec", "--format", "md", "--check", str(DOC)]) == 0
+
+
+@pytest.fixture
+def overlay_consumer(tmp_path, monkeypatch):
+    """A site_overlay consumer, set up the way checks.cli-spec-drift runs: the data root an EMPTY folder, no
+    site file. Returns (pipeline.toml, a site file that names other values, the data root)."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    text = PIPELINE.read_text().replace("[consumer]\n", "[consumer]\nsite_overlay = true\n", 1)
+    text = text.replace('python_path = ["examples"]', f'python_path = ["{ROOT / "examples"}"]')
+    text = text.replace('schema_dirs = ["examples/', f'schema_dirs = ["{ROOT}/examples/')
+    (proj / "pipeline.toml").write_text(text)
+    site = tmp_path / "site.toml"
+    site.write_text(
+        '[pipeline.consumer]\ndefault_site = "overlay-only.invalid"\ndefault_region = "overlay-region"\n'
+        'site_hosts = ["overlay-only.invalid"]\n'
+    )
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("SCRAPE_HARNESS_PIPELINE", str(proj / "pipeline.toml"))
+    monkeypatch.delenv("EX_SITE_CONFIG", raising=False)
+    monkeypatch.setenv("EXAMPLE_DATA", str(data))
+    return proj / "pipeline.toml", site, data
+
+
+def test_a_site_overlay_consumer_renders_from_its_repo_file_with_no_site_file(capsys, overlay_consumer):
+    """What checks.cli-spec-drift runs in the sandbox: no site file exists, and the render still works."""
+    by = {(r["cmd"], r["opt"]): r for r in rows(capsys)}
+    assert by[("crawl-lists", "--source")]["default"] == "example.invalid"  # the repo's placeholder
+    assert by[("crawl-lists", "--region")]["default"] == "sample-region"
+    assert spec(capsys, "--format", "md") == spec(capsys, "--format", "md")
+
+
+def test_a_site_overlay_consumer_never_renders_a_site_value(capsys, overlay_consumer, monkeypatch):
+    """The site file is present (the operator's machine): no value of it may reach a committed render."""
+    _, site, _ = overlay_consumer
+    bare = {f: spec(capsys, *f) for f in [(), ("--format", "md")]}
+    monkeypatch.setenv("EX_SITE_CONFIG", str(site))
+    for fmt, text in bare.items():
+        got = spec(capsys, *fmt)
+        assert "overlay-only.invalid" not in got and "overlay-region" not in got
+        assert got == text  # one render, whichever machine runs it
+    from scrape_harness import pipeline
+
+    assert pipeline.consumer().default_site == "overlay-only.invalid"  # the rest of the CLI still reads it

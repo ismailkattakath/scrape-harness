@@ -76,6 +76,7 @@
           plugin = "${plugin pkgs}";
           cliPackage = cli pkgs; # apps.<cli>, apps.preflight, apps.cli-spec
           # cliSpecDoc = ./docs/cli.md;  # commit `<cli> cli spec --format md > docs/cli.md`, then this adds checks.cli-spec-drift
+          #   (with site_overlay too: `cli spec` renders from this repo's pipeline.toml, never the site file)
         };
     in
     {

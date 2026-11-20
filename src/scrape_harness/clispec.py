@@ -10,8 +10,10 @@ depends on the terminal width and the Python version.
 Not in the tree: `plan <command> ...` (the same as `<command> ... --plan`) and `statusline`, which
 `main` handles before parsing. `run` is in the tree as a help-only entry.
 
-Some defaults and help texts come from `pipeline.consumer()` (e.g. `--source`'s default site). For a
-consumer with a site overlay those are site values, so its render is not for a committed file as is.
+Some defaults and help texts come from `pipeline.consumer()` (e.g. `--source`'s default site). `main`
+builds the parser for `cli spec` inside `pipeline.repo_only()`, so a site-overlay consumer renders from its
+REPO pipeline.toml: the committed placeholders, never a site file's values, and no site file is needed (the
+Nix sandbox of checks.cli-spec-drift has none). One render on every machine.
 """
 
 from __future__ import annotations

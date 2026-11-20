@@ -2294,6 +2294,13 @@ def main(argv: list[str] | None = None) -> int:
         return tasks.run(rest[: rest.index("--")] if "--" in rest else rest, extra)
     if argv[:1] == ["plan"]:  # `<cli> plan <command> <args>` == `<cli> <command> <args> --plan`
         argv = [*argv[1:], "--plan"]
+    if argv[:2] == ["cli", "spec"]:  # a committed render: the repo's pipeline, never a site file's values
+        with pipeline.repo_only():
+            return _main(argv)
+    return _main(argv)
+
+
+def _main(argv: list[str]) -> int:
     try:
         args = parser().parse_args(argv)
     except pipeline.PipelineError as e:  # e.g. a declared site file is unreadable: one line, not a traceback

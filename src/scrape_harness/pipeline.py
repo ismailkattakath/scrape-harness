@@ -15,8 +15,10 @@ file is an error (never the repo's example values); a key outside the allowlist 
 
 from __future__ import annotations
 
+import contextlib
 import os
 import tomllib
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from functools import cache
 from pathlib import Path
@@ -362,10 +364,34 @@ def source_class(name: str):
     return resolve(spec) if spec else None
 
 
+_REPO_ONLY: ContextVar[bool] = ContextVar("repo_only", default=False)
+
+
+@contextlib.contextmanager
+def repo_only():
+    """Inside it, current() is the repo's own pipeline, never the site overlay: a render that is COMMITTED
+    (`cli spec`) must not depend on, or carry, a site file's values, and must work where none exists."""
+    token = _REPO_ONLY.set(True)
+    try:
+        yield
+    finally:
+        _REPO_ONLY.reset(token)
+
+
+@cache
+def _cached_repo(key: str) -> Pipeline:
+    pl = load_repo(key)
+    for d in pl.schema_dirs:
+        contracts.add_schema_dir(d)
+    return pl
+
+
 def current() -> Pipeline:
     """The located pipeline, loaded once per path and site file (a changed $SCRAPE_HARNESS_PIPELINE, or a
-    site file named differently by the environment, reloads)."""
+    site file named differently by the environment, reloads). Inside repo_only(): without any overlay."""
     key = str(locate().resolve())
+    if _REPO_ONLY.get():
+        return _cached_repo(key)
     ov = overlay_file(_doc(key))
     return _cached(key, str(ov) if ov else None)
 
