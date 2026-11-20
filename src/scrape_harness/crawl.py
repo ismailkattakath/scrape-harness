@@ -797,7 +797,8 @@ async def _crawl(
     ignore = tuple(getattr(source, "ignore_selectors", ()))
     gone_selectors = tuple(getattr(source, "gone_selectors", ()))  # the source's "ad no longer active" page
     end_selectors = tuple(getattr(source, "end_selectors", ()))  # its "no results" list page (an END)
-    end_statuses = tuple(getattr(source, "end_statuses", ()))  # the statuses its END answers with (all: unset)
+    # the statuses its END answers with (unset: every status end_reason admits)
+    end_statuses = tuple(getattr(source, "end_statuses", ()))
     blocks = variants.get(job.doc["variant"]).blocks
     block = browser.block_extensions() if blocks else ()
     site_host = (urlsplit(source.robots_url).hostname or "").removeprefix("www.")
@@ -847,7 +848,11 @@ async def _crawl(
     async def count_page(ctx) -> None:  # every page GET attempt, HTTP or browser, retries included
         counts["ad_pages" if ctx.request.user_data.get("kind") == "ad" else "list_pages"] += 1
         lst = job.doc.get("list") or {}
-        if walk and ctx.request.user_data.get("kind", "list") == "list" and lst.get("mode") in ("walk", "frontier"):
+        if (
+            walk
+            and ctx.request.user_data.get("kind", "list") == "list"
+            and lst.get("mode") in ("walk", "frontier")
+        ):
             # a walk's signed ceiling counts every list GET it SENDS (a retry, a challenged GET, a page a crash
             # or a stop hands back): counted here, before the GET, and saved, so a resume's cap (ceiling -
             # settled) never lets the walk send more than it signed. The GET that reaches the ceiling is never
@@ -1070,7 +1075,9 @@ async def _crawl(
         # --snapshot) hand it to the handler alike. Only crawl-lists' handler decides an END, so only its runs
         # (`walk`) nominate one: any other list reader (ab) stops on such a page as before.
         nominee = (
-            challenge.end_reason(res, reason, end_selectors, ignore, end_statuses) if kind == "list" and walk else None
+            challenge.end_reason(res, reason, end_selectors, ignore, end_statuses)
+            if kind == "list" and walk
+            else None
         )
         end = nominee == "end_marker"
         if kind == "list" and ctx.request.user_data.get("snapshot"):

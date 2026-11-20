@@ -975,7 +975,9 @@ def consume_bounded(
     if step_doc.get("command") == "crawl-lists":  # a walk's rules first: a mismatch is no approval at all
         args, sets = list_args(step_doc), signed_lists(b)
         shape = {k: v for k, v in args.items() if k not in LIST_RULE_KEYS}
-        alike = [x for x in sets if {k: v for k, v in list_args(x).items() if k not in LIST_RULE_KEYS} == shape]
+        alike = [
+            x for x in sets if {k: v for k, v in list_args(x).items() if k not in LIST_RULE_KEYS} == shape
+        ]
         if alike and not any(list_args(x) == args for x in alike):
             got = {k: args.get(k) for k in LIST_RULE_KEYS if k in args}
             raise NotApproved(

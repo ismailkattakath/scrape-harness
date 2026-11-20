@@ -125,7 +125,10 @@ def test_the_refresh_card_shows_each_walk_step(walks, capsys):
     capsys.readouterr()
     assert main(["refresh"]) == 10
     err = capsys.readouterr().err
-    assert "list step (1) widgets: census walk, at most 4 list GETs, at least 2 pages; passes only on a positive END" in err
+    assert (
+        "list step (1) widgets: census walk, at most 4 list GETs, at least 2 pages; passes only on a positive END"
+        in err
+    )
     assert "list step (2) gadgets: frontier walk, list order unordered: no early stop" in err
     assert "passes on an anchor, a positive END or the ceiling (a GAP)" in err
 

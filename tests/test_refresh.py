@@ -273,7 +273,9 @@ def test_a_walk_step_whose_rules_changed_is_not_approved_and_appends_nothing(dat
     with pytest.raises(approvals.NotApproved, match="changed since the approval"):
         approvals.consume_bounded(doc, st["run_id"], "crawl-lists")
     assert lines(data_dir) == before
-    assert approvals.consume_bounded(crawl_doc(list_pages=5, **WALK_SET), st["run_id"], "crawl-lists")["bounded"]
+    assert approvals.consume_bounded(crawl_doc(list_pages=5, **WALK_SET), st["run_id"], "crawl-lists")[
+        "bounded"
+    ]
 
 
 def test_the_bounds_sign_the_fetch_ads_policy(chain, data_dir, capsys):

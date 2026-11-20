@@ -183,13 +183,18 @@ def test_a_bootstrap_gap_survives_a_second_ceiling(data_dir, tmp_path, marker, o
     assert frontier(site(tmp_path / "f1", many), "--max-pages", "3") == 0
     first = latest_doc()
     FixtureHttpClient.log.clear()
-    assert frontier(site(tmp_path / "f2", [ids(6000001), ids(6000007), ids(6000013)] + many), "--max-pages", "2") == 0
+    assert (
+        frontier(site(tmp_path / "f2", [ids(6000001), ids(6000007), ids(6000013)] + many), "--max-pages", "2")
+        == 0
+    )
     gap = latest_doc()["list"]["gap"]
     # the smaller ceiling widens the GAP: pages after 2 are now unread, still since no reference
     assert gap == {"after_page": 2, "since_ref": None, "opened_by": first["run_id"]}
 
 
-def test_a_census_at_its_ceiling_records_a_gap_that_a_frontier_carries_on(data_dir, tmp_path, marker, ordered):
+def test_a_census_at_its_ceiling_records_a_gap_that_a_frontier_carries_on(
+    data_dir, tmp_path, marker, ordered
+):
     """A census that hits its ceiling is a good crawl and a valid reference, so it records its own GAP (the
     pages past its ceiling were not read); a frontier anchored on it carries that GAP on, never `gap: None`."""
     assert crawl_lists(site(tmp_path / "ref", REF), "--mode", "walk", "--max-pages", "2") == 0
@@ -392,7 +397,9 @@ def stopped_walk(tmp_path, mode: str) -> str:
 
 
 @pytest.mark.parametrize("mode", ["walk", "frontier"])
-def test_a_walk_resume_refuses_a_policy_that_changed_since_its_start(data_dir, tmp_path, marker, monkeypatch, mode):
+def test_a_walk_resume_refuses_a_policy_that_changed_since_its_start(
+    data_dir, tmp_path, marker, monkeypatch, mode
+):
     """The walk records the policy digest it was approved under; a resume under other rules (a harness bump
     between the run and its resume) is refused, exit 10, with no GET, as a fetch-ads resume is."""
     d = stopped_walk(tmp_path, mode)

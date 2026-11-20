@@ -149,7 +149,9 @@ def gone_reason(
 GONE = ("http_404", "http_410")
 
 
-def end_reason(r: FetchResult, reason: str | None, end_selectors=(), ignore=(), end_statuses=()) -> str | None:
+def end_reason(
+    r: FetchResult, reason: str | None, end_selectors=(), ignore=(), end_statuses=()
+) -> str | None:
     """`end_marker` when a LIST page carries the source's own "no results" template (end_selectors) on a page
     with no challenge sign and no wall, else None. It admits a clean page (None), one that is merely not the list
     (`unexpected_page`) and a 404/410 (GONE), because detect() returns http_4xx before the expectation check, so
