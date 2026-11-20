@@ -36,7 +36,9 @@ Absent means the command needs none.
 `--json` and `--egress` are preflight's own flags wherever they appear.
 
 From any shell, `nix run .#preflight -- refresh` runs the same check. It
-loads the checkout's env files first, as the dev shell does.
+first loads the checkout's `.env`, `.env.local` and `.envrc.local`, the
+files the `.envrc` loads. It loads them only when direnv allows that
+`.envrc`; see "Consumer tools" in the README for the order.
 
 ## What it checks
 

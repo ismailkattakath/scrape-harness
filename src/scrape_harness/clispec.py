@@ -13,7 +13,9 @@ Not in the tree: `plan <command> ...` (the same as `<command> ... --plan`) and `
 Some defaults and help texts come from `pipeline.consumer()` (e.g. `--source`'s default site). `main`
 builds the parser for `cli spec` inside `pipeline.repo_only()`, so a site-overlay consumer renders from its
 REPO pipeline.toml: the committed placeholders, never a site file's values, and no site file is needed (the
-Nix sandbox of checks.cli-spec-drift has none). One render on every machine.
+Nix sandbox of checks.cli-spec-drift has none). One render on every machine. The cost: a flag the parser
+derives from an overlay-only value is absent, e.g. `refresh --<step>-count` for a paid step declared only in
+the site file's [crawl.refresh].
 """
 
 from __future__ import annotations

@@ -107,7 +107,8 @@ let
   # Trust: the files are loaded only from a checkout whose .envrc direnv ALLOWS (`direnv status`, the same
   # allow list a direnv shell obeys: never allowed, edited since, denied or absent refuse), so a foreign
   # repo's .envrc.local never runs with the operator's environment. A checkout with none of the files needs
-  # no allow. The root is the git toplevel of the cwd, and it must be THIS consumer's checkout (pipeline.toml
+  # no allow. A loaded SCRAPE_HARNESS_PIPELINE (unset ambiently) must name a file inside the root. The root
+  # is the git toplevel of the cwd, and it must be THIS consumer's checkout (pipeline.toml
   # [consumer].cli). Every refusal is exit 4, the CLI's own config refusal. The cwd and argv are unchanged,
   # PRJ_ROOT is the root (as the shellHook sets it). Nothing here prints a value.
   envLoader = ''
@@ -147,6 +148,7 @@ let
     # The child prints its environment twice as NAME=VALUE\0 records (`env -0`; non-interactive bash has
     # no compgen), each followed by an EMPTY record: once before .envrc.local, once after. An .envrc.local
     # that `exit`s never prints the second mark. Its own stdout is discarded; never a value shown.
+    _ambient_pipeline="''${SCRAPE_HARNESS_PIPELINE:-}"
     declare -A _before=()
     phase=0
     while IFS= read -r -d "" rec; do
@@ -175,6 +177,12 @@ let
       printf '\0'
     )
     [ "$phase" = 2 ] || refuse "$root/.envrc.local did not finish (it exited); nothing was run"
+    # The gate above read $root/pipeline.toml: a loaded file may not point the CLI at one outside $root.
+    if [ -z "$_ambient_pipeline" ] && [ -n "''${SCRAPE_HARNESS_PIPELINE:-}" ]; then
+      python3 -I -c 'import os, sys; p, r = (os.path.realpath(a) for a in sys.argv[1:]); sys.exit(os.path.commonpath([p, r]) != r)' \
+        "$SCRAPE_HARNESS_PIPELINE" "$root" \
+        || refuse "SCRAPE_HARNESS_PIPELINE from this checkout's env files names a pipeline.toml outside $root; refusing"
+    fi
   '';
   cliApp =
     name: argv:

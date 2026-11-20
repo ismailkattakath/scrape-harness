@@ -193,7 +193,8 @@ A consumer merges `apps`, `appPackages` and `checks` into its own outputs.
   direnv shell. A dotenv file sets only names still unset.
 - `.envrc.local` is plain shell, sourced after the dotenv files. direnv's
   own functions are not there.
-- It refuses (exit 4) outside a git checkout of this consumer.
+- It refuses (exit 4) outside a git checkout of this consumer, and when a
+  loaded file points `SCRAPE_HARNESS_PIPELINE` outside the checkout.
 - It prints no value.
 
 `nix run .#preflight -- refresh` is `<cli> preflight refresh`.

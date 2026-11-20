@@ -419,8 +419,9 @@
 
           # GOES RED WHEN: the template flake names a lib function, a consumerTools argument or a
           # consumerTools output that the harness does not have (e.g. a renamed appPackages). Read from the
-          # template's text at eval time: evaluating its outputs would need its FILLED pipeline.toml, i.e.
-          # import-from-derivation, which `nix flake check` cannot do for the other systems.
+          # template's text at eval time. It does not evaluate the outputs: those read the FILLED pipeline.toml
+          # (data_env = state_env = "FILL-ME" otherwise), so that needs import-from-derivation (not attempted).
+          # A typo inside a merge expression is still caught only by a real consumer's `nix flake check`.
           template-wiring =
             let
               text = builtins.readFile ./templates/default/flake.nix;
@@ -612,6 +613,14 @@
                 cd "$TMPDIR"; git init -q plain; printf '[consumer]\ncli = "${consumer.cli}"\n' > plain/pipeline.toml; cd plain
                 rm -f "$REPORT"; ${app consumer.cli} --help > out 2> err || fail "a checkout with no env files was refused: $(cat err)"
                 want "ARG=--help"
+                # a loaded file may not point the CLI at another checkout's pipeline.toml (the one the gate read)
+                cd "$TMPDIR/repo"; printf 'export SYN_X=from-x\n' > .envrc.local
+                mkdir -p "$TMPDIR/elsewhere"; printf '[consumer]\ncli = "${consumer.cli}"\n' > "$TMPDIR/elsewhere/pipeline.toml"
+                cp .env env.orig; echo "SCRAPE_HARNESS_PIPELINE=$TMPDIR/elsewhere/pipeline.toml" >> .env
+                refused "SCRAPE_HARNESS_PIPELINE" ${app consumer.cli} --help
+                cp env.orig .env; echo "SCRAPE_HARNESS_PIPELINE=$TMPDIR/repo/sub/../pipeline.toml" >> .env
+                rm -f "$REPORT"; ${app consumer.cli} --help > out 2> err || fail "a pipeline inside the root was refused: $(cat err)"
+                want "ARG=--help"
                 touch "$out"
               '';
 
@@ -687,6 +696,22 @@
 
           # GOES RED WHEN: the consumer-facing lib cannot be called the way a consumer flake calls it
           # (every argument, incl. plugin and extraCatalogue). The harness's own tools pass fewer.
+          # GOES RED WHEN: checks.cli-spec-drift cannot pass for a SITE-OVERLAY consumer: the example's tree with
+          # `site_overlay = true` and no site file anywhere (the sandbox) must render docs/cli.md unchanged.
+          cli-spec-drift-overlay =
+            let
+              overlaySrc = pkgs.runCommandLocal "overlay-consumer-src" { } ''
+                cp -r ${src} "$out"; chmod -R u+w "$out"
+                sed -i 's/^\[consumer\]$/[consumer]\nsite_overlay = true/' "$out/pipeline.toml"
+                grep -qx 'site_overlay = true' "$out/pipeline.toml" || { echo "site_overlay was not set" >&2; exit 1; }
+              '';
+            in
+            (self.lib.consumerTools {
+              inherit pkgs consumer;
+              cliPackage = self.packages.${system}.default;
+              cliSpecDoc = ./docs/cli.md;
+              pipeline = "${overlaySrc}/pipeline.toml";
+            }).checks.cli-spec-drift;
           consumer-lib =
             (self.lib.consumerTools {
               inherit pkgs consumer;
