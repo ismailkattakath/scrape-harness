@@ -239,6 +239,7 @@ def build_bounds(ttl: str = DEFAULT_TTL, max_ad_requests: int | None = None) -> 
             source = load("sources", ns.source)
             site = source.site
             _needs_end_marker(ns, source)
+            _needs_min_pages(ns)
             v = cli._variant(ns, source, "list")  # noqa: SLF001
             if cli._networked(ns, [v]):  # noqa: SLF001
                 cli._deterministic(ns)  # noqa: SLF001 - the signed sample is the one crawled
@@ -316,6 +317,20 @@ def _needs_end_marker(ns: argparse.Namespace, source) -> None:
               f"marker, and source {source.site} declares no end_selectors: add them to the plug-in, with a test "
               "on a saved past-end page (its status and final_url), before a census or frontier step enters the "
               "refresh", file=sys.stderr)  # fmt: skip
+        raise SystemExit(cli.EXIT_CONTRACT)
+
+
+def _needs_min_pages(ns: argparse.Namespace) -> None:
+    """A census step enters a refresh only with its short-census guard signed (`--min-pages N`, about half the
+    last census, ADR-0017 A.1; exit 2 at plan time otherwise). Fail closed: without it a renamed subcategory or a
+    soft block that serves the site's "no results" template on page 1, or a site that ignores the page parameter
+    (a clamp on page 2), passes as a complete census with 0 or 1 pages."""
+    from . import cli
+
+    if cli._mode(ns) == "walk" and getattr(ns, "min_pages", None) is None:  # noqa: SLF001
+        print(f"refusing: a refresh's crawl-lists --mode walk step ({ns.subcategory}) needs --min-pages N (about "
+              "half the last census of the list): a census that ENDS before N pages is then a short census "
+              "(exit 14), never a passing positive END", file=sys.stderr)  # fmt: skip
         raise SystemExit(cli.EXIT_CONTRACT)
 
 
@@ -463,7 +478,10 @@ def list_postcondition(run_id: str, objs: list[dict], mode=_DOC) -> str | None:
     if lst.get("status") not in ok:
         how = f"; a {MODE_WORDS[mode]} passes only on {', '.join(sorted(ok))}" if mode in MODE_WORDS else ""
         return f"{rid} has list.status {lst.get('status')}{how}"
-    empty = lst.get("status") == "end" and lst.get("end_page") == 0  # page 1 positively ENDED: no cards
+    # page 1 positively ENDED (no cards): an empty subcategory, only to a walk mode. A step with no mode needs rows,
+    # as before the walks (a renamed slug or a soft block on page 1 carries the same marker); a census step has a
+    # signed --min-pages >= 1, so it can never reach this (short_census)
+    empty = mode in MODE_WORDS and lst.get("status") == "end" and lst.get("end_page") == 0
     if not (lst.get("observations_written") or 0) > 0 and not empty:
         return f"{rid} has 0 observations written"
     return None

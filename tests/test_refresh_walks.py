@@ -80,7 +80,7 @@ def walk_pipeline(tmp_path, monkeypatch, fp, root, steps: list[list[str]], end_s
     return p
 
 
-CENSUS = ["--subcategory", "widgets", "--mode", "walk", "--max-pages", "4"]
+CENSUS = ["--subcategory", "widgets", "--mode", "walk", "--max-pages", "4", "--min-pages", "2"]
 FRONTIER = ["--subcategory", "gadgets", "--mode", "frontier", "--max-pages", "1"]
 
 
@@ -125,7 +125,7 @@ def test_the_refresh_card_shows_each_walk_step(walks, capsys):
     capsys.readouterr()
     assert main(["refresh"]) == 10
     err = capsys.readouterr().err
-    assert "list step (1) widgets: census walk, at most 4 list GETs; passes only on a positive END" in err
+    assert "list step (1) widgets: census walk, at most 4 list GETs, at least 2 pages; passes only on a positive END" in err
     assert "list step (2) gadgets: frontier walk, list order unordered: no early stop" in err
     assert "passes on an anchor, a positive END or the ceiling (a GAP)" in err
 
@@ -141,7 +141,7 @@ def test_a_census_at_its_ceiling_is_terminal_and_fetch_ads_never_runs(
     """A census that hit its ceiling did not read the whole list: in a refresh that is exit 14, terminal."""
     root = walk_site(tmp_path, {"widgets": [[1000001], [1000002], [1000003]]})
     walk_pipeline(tmp_path, monkeypatch, operator_key["fp"], root,
-                  [["--subcategory", "widgets", "--mode", "walk", "--max-pages", "2"]])  # fmt: skip
+                  [["--subcategory", "widgets", "--mode", "walk", "--max-pages", "2", "--min-pages", "1"]])  # fmt: skip
     approved(capsys)
     assert main(["refresh", "--approve-network"]) == 14
     assert names(chain) == ["crawl-lists"]
@@ -187,6 +187,36 @@ def test_every_mode_pass_set_is_a_good_crawl_set():
     """One rule: a refresh never passes a list read that liveness would not count as a good crawl."""
     for mode, ok in refresh.PASS_STATUS.items():
         assert ok <= liveness.DEFAULT.good_list_status, mode
+
+
+def test_an_empty_end_passes_only_a_walk_mode(monkeypatch):
+    """A positive END on page 1 (end_page 0, no rows) is an empty subcategory to a frontier (ADR-0017 C.4). A
+    step with no mode needs rows, as before the walks: a renamed slug or a soft block on page 1 also carries
+    the site's "no results" marker, and only a walk's own guards (a census' --min-pages) judge that."""
+    empty = {"status": "end", "end_page": 0, "observations_written": 0}
+    assert _post(monkeypatch, empty | {"mode": "frontier"}, mode="frontier") is None
+    assert "0 observations" in _post(monkeypatch, empty | {"mode": None}, mode=None)
+
+
+def test_a_census_step_without_min_pages_is_refused_at_plan_time(
+    tmp_path,
+    monkeypatch,
+    data_dir,
+    capsys,
+    operator_key,  # noqa: F811
+):
+    """A census enters a refresh only with its short-census guard signed (--min-pages, about half the last
+    census, ADR-0017 A.1): without it an empty or a 1-page census of a renamed or soft-blocked list would pass
+    as a complete positive END."""
+    root = walk_site(tmp_path, {"widgets": [[1000001]]})
+    walk_pipeline(tmp_path, monkeypatch, operator_key["fp"], root,
+                  [["--subcategory", "widgets", "--mode", "walk", "--max-pages", "4"]])  # fmt: skip
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as e:
+        main(["refresh"])
+    assert e.value.code == 2
+    assert "--min-pages" in capsys.readouterr().err
+    assert not list(approvals._dir("plans").glob("*.json"))  # noqa: SLF001  # nothing saved to sign
 
 
 # ── Migration step 5: a walk step needs the site's end marker ───────────────────────────────────────

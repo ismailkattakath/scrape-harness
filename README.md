@@ -112,8 +112,9 @@ approval. It is a **strict chain**: a failed step stops every step after it.
 - A crawl-lists step may carry `--mode walk|frontier`, `--min-pages` and
   `--max-pages` in its `args`. The bounds sign each step's set and count
   exactly `--max-pages` list GETs for a walk.
-- A walk step needs a source that declares `end_selectors`. Without them
-  `refresh` refuses it at plan time, with **exit 2**.
+- A walk step needs a source that declares `end_selectors`, and a census
+  step needs `--min-pages`. Without them `refresh` refuses it at plan time,
+  with **exit 2**.
 - A **crawl-lists step passes only** when all of these hold:
   - it exited 0;
   - its run doc is of the step's mode, with a passing `list.status`:
@@ -123,8 +124,8 @@ approval. It is a **strict chain**: a failed step stops every step after it.
     | `--mode walk` | `end` (a clamp included) |
     | `--mode frontier` | `anchored`, `end` or `ceiling_hit` (shown as a GAP) |
     | no mode | `ok`, `end`, `ceiling_hit` or `anchored` |
-  - it wrote at least one observation, or page 1 positively ENDED (an empty
-    subcategory).
+  - it wrote at least one observation, or, for a walk step, page 1
+    positively ENDED (an empty subcategory).
 - Anything else is recorded as **exit 14**. That is terminal: the approval is
   spent, and fetch-ads never runs on a list read that cannot be trusted.
 - Inside a refresh, "fresh" means sighted by a list step of **this** refresh

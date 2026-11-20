@@ -204,8 +204,10 @@ step after it.
   - the run doc it names is a completed crawl-lists run of this refresh;
   - its `list.mode` is the mode the step declares (`--mode` in its args);
   - its `list.status` passes for that mode (`refresh.PASS_STATUS`, below);
-  - `observations_written` is above 0, or page 1 itself positively ENDED
-    (`end_page: 0`, an empty subcategory).
+  - `observations_written` is above 0, or, for a walk mode, page 1 itself
+    positively ENDED (`end_page: 0`, an empty subcategory). A step with no
+    mode needs rows, as before the walks: a renamed slug or a soft block on
+    page 1 carries the same marker.
 
   | Step's `--mode` | Passes on `list.status` | Exit 14 on |
   |---|---|---|
@@ -233,6 +235,11 @@ step after it.
   harness checks only that the selectors are declared. The plug-in's own
   test shows that they match a saved past-end page, with its status and
   final_url.
+- **A census step needs `--min-pages`** (ADR-0017 A.1: about half the last
+  census). `refresh` refuses a `--mode walk` step without it, with **exit 2**,
+  before any plan is saved (`refresh._needs_min_pages`). Fail closed: without
+  it, an empty or 1-page census of a renamed or soft-blocked list, or of a
+  site that ignores the page parameter, would pass as a complete END.
 - The refresh's **run card** has a line per walk step: its mode, its signed
   ceiling, `--min-pages`, and what it passes on. For a frontier, it also
   names the reference crawl as DATA holds it now, and that reference's open

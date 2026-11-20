@@ -103,8 +103,8 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   GAP), and the end summary shows a walk's mode, pages read, `end_page`,
   anchor and GAP. See "Refresh postconditions" in [docs/sync.md](docs/sync.md).
 - A walk step enters a refresh only when its source declares `end_selectors`
-  (ADR-0017 Migration step 5): `refresh` refuses it at plan time, exit 2,
-  before any plan is saved.
+  (ADR-0017 Migration step 5), and a census step only with `--min-pages`:
+  `refresh` refuses it at plan time, exit 2, before any plan is saved.
 
 ### Changed (breaking for consumers)
 
@@ -112,8 +112,9 @@ Incremental sync, slice 1. The design is in [docs/sync.md](docs/sync.md).
   that yields no observation now end with exit 14.
 - A good crawl (`liveness.good_crawl`, and a refresh's list postcondition) is
   now a completed run with `list.status` `ok`, `end`, `ceiling_hit` or
-  `anchored`; a refresh list step that positively ENDED on page 1 (an empty
-  subcategory) passes with 0 observations. `SyncPolicy.lanes` is
+  `anchored`; a refresh walk step that positively ENDED on page 1 (an empty
+  subcategory) passes with 0 observations (a step with no mode still needs
+  rows). `SyncPolicy.lanes` is
   `select_ads.v3`, so the policy digest changes.
 - A list page that fails after its retries, or that robots.txt blocks, now ends
   the crawl with exit 13, not `completed`.

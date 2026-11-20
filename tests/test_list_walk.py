@@ -470,8 +470,10 @@ def _postcondition(monkeypatch, lst: dict, status="completed"):
 def test_refresh_postcondition_passes_the_walk_outcomes(monkeypatch):
     assert _postcondition(monkeypatch, {"status": "end", "end_page": 3, "observations_written": 6}) is None
     assert _postcondition(monkeypatch, {"status": "ceiling_hit", "observations_written": 6}) is None
-    # an empty subcategory: a positive END on page 1 is the one pass with 0 rows
-    assert _postcondition(monkeypatch, {"status": "end", "end_page": 0, "observations_written": 0}) is None
+    # an empty subcategory: a positive END on page 1 is the one pass with 0 rows, for a walk mode only (a census
+    # step signs --min-pages >= 1 in a refresh, so this is a frontier's; test_refresh_walks has the no-mode case)
+    assert _postcondition(monkeypatch, {"mode": "frontier", "status": "end", "end_page": 0,
+                                        "observations_written": 0}) is None  # fmt: skip
     assert "0 observations" in _postcondition(
         monkeypatch, {"status": "end", "end_page": 3, "observations_written": 0}
     )
