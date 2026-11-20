@@ -481,10 +481,7 @@ def _proxy_plan(args: argparse.Namespace, doc: dict) -> dict:
     elif len(ps.urls) == 1:
         url = ps.urls[0]
     elif getattr(args, "plan", False):
-        out = tuple(getattr(args, "proxy_exclude", None) or ())
-        keep = tuple(u for u in ps.urls if not any(x in u for x in out))
-        if not keep:
-            raise SystemExit(f"--proxy-exclude {' '.join(out)} leaves no proxy of {len(ps.urls)}")
+        keep = proxy.allowed(ps.urls, None, getattr(args, "proxy_exclude", None)) or ps.urls
         url = proxy.choose(dataclasses.replace(ps, urls=keep))  # the run finds it among all, by signature
     else:
         signed = [u for u in ps.urls if approvals.has_live(approvals.canonical(doc | {"proxy": u})[1])]
@@ -1410,10 +1407,8 @@ def cmd_probe_robots(args: argparse.Namespace) -> int:
         from . import proxy
 
         ps = proxy.proxy_set()
-        keep = [u for u in (ps.urls if ps else ()) if args.proxy_only in u]
-        if len(keep) != 1:
-            raise SystemExit(f"--proxy-only {args.proxy_only} matches {len(keep)} configured proxies, not 1")
-        args.proxy_exclude = [u for u in ps.urls if u != keep[0]]
+        (keep,) = proxy.allowed(ps.urls if ps else (), args.proxy_only)  # exactly one, or it refuses
+        args.proxy_exclude = [u for u in ps.urls if u != keep]
     _polite(args)
     approval = gate(
         args,

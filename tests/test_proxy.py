@@ -370,3 +370,45 @@ def test_a_resume_plan_signs_the_runs_own_proxy_never_a_new_pick(three, data_dir
         assert _proxy_plan(SimpleNamespace(plan=True, kept_proxy=DEAD[1]), {}) == {"proxy": DEAD[1]}
     with pytest.raises(SystemExit, match="no longer configured"):
         _proxy_plan(SimpleNamespace(plan=True, kept_proxy="http://127.0.0.1:49"), {})
+
+
+class _Picked(Exception):
+    pass
+
+
+def test_one_substring_pick_serves_refresh_probe_robots_and_crawl_lists(monkeypatch):
+    """`refresh --proxy-only/--proxy-exclude`, `probe robots --proxy-only` and a crawl plan's `--proxy-exclude`
+    pick by ONE function (proxy.allowed), so the match rule and the refusal text cannot drift apart."""
+    import dataclasses as dc
+    from types import SimpleNamespace
+
+    from scrape_harness import cli, refresh
+
+    urls = ("http://ca-a.proxy.example.invalid:8080", "http://ca-b.proxy.example.invalid:8080")
+    real = pipeline.current()
+    cfg = {"urls": list(urls), "choice": "random", "user_secret": "a:b", "password_secret": "a:c"}
+    monkeypatch.setattr(pipeline, "current", lambda: dc.replace(real, proxy=cfg))
+    calls = []
+
+    def spy(*a, **k):
+        calls.append(a)
+        raise _Picked
+
+    monkeypatch.setattr(proxy, "allowed", spy)
+    for run in (
+        lambda: refresh.allowed_proxies(urls, "ca-a."),
+        lambda: cli.cmd_probe_robots(SimpleNamespace(source=real.consumer.default_site, proxy_only="ca-a.")),
+        lambda: cli._proxy_plan(SimpleNamespace(plan=True, proxy_exclude=["ca-a."]), {}),  # noqa: SLF001
+    ):
+        with pytest.raises(_Picked):
+            run()
+    assert len(calls) == 3
+    monkeypatch.undo()
+    for only, exclude, msg in [
+        ("ca-", (), "--proxy-only ca- matches 2 configured proxies, not 1"),
+        (None, ("ca-a.", "ca-b."), "--proxy-exclude ca-a. --proxy-exclude ca-b. leaves no proxy of 2"),
+    ]:
+        with pytest.raises(SystemExit, match=msg):
+            proxy.allowed(urls, only, exclude)
+    assert proxy.allowed(urls, None, ()) is None
+    assert proxy.allowed(urls, "ca-b.", ()) == (urls[1],)

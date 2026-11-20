@@ -360,25 +360,11 @@ def _needs_min_pages(ns: argparse.Namespace) -> None:
 def allowed_proxies(
     proxies: tuple[str, ...], only: str | None = None, exclude: list[str] | tuple[str, ...] | None = ()
 ) -> tuple[str, ...] | None:
-    """The configured urls a NEW plan may pick under --proxy-only / --proxy-exclude, or None when neither is set
-    (the pick is then exactly as before). --proxy-only keeps the ONE url containing TEXT, --proxy-exclude drops
-    every url containing any TEXT; both apply together, whatever the number configured. Refuses when they
-    leave no url, or --proxy-only matches not exactly one."""
-    exclude = tuple(exclude or ())
-    if not only and not exclude:
-        return None
-    keep = proxies
-    if only:
-        keep = tuple(u for u in proxies if only in u)
-        if len(keep) != 1:
-            raise SystemExit(f"--proxy-only {only} matches {len(keep)} configured proxies, not 1")
-    keep = tuple(u for u in keep if not any(x in u for x in exclude))
-    if not keep:
-        flags = " ".join(
-            [*([f"--proxy-only {only}"] if only else []), *(f"--proxy-exclude {x}" for x in exclude)]
-        )
-        raise SystemExit(f"{flags} leaves no proxy of {len(proxies)}")
-    return keep
+    """A NEW plan's --proxy-only / --proxy-exclude pick: proxy.allowed, the one substring rule `probe robots`
+    and `crawl-lists` use too (refresh applies it whatever the number of urls configured)."""
+    from . import proxy
+
+    return proxy.allowed(proxies, only, exclude)
 
 
 def pick_proxy(bounds: dict, proxies: tuple[str, ...], allowed: tuple[str, ...] | None = None) -> dict:

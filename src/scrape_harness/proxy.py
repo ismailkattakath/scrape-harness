@@ -91,6 +91,31 @@ def deactivate() -> None:
     _ACTIVE.clear()
 
 
+def allowed(
+    proxies: tuple[str, ...], only: str | None = None, exclude: list[str] | tuple[str, ...] | None = ()
+) -> tuple[str, ...] | None:
+    """THE substring pick (refresh, probe robots, a crawl plan): the configured urls a NEW plan may pick under
+    --proxy-only / --proxy-exclude, or None when neither is set
+    (the pick is then exactly as before). --proxy-only keeps the ONE url containing TEXT, --proxy-exclude drops
+    every url containing any TEXT; both apply together, whatever the number configured. Refuses when they
+    leave no url, or --proxy-only matches not exactly one."""
+    exclude = tuple(exclude or ())
+    if not only and not exclude:
+        return None
+    keep = proxies
+    if only:
+        keep = tuple(u for u in proxies if only in u)
+        if len(keep) != 1:
+            raise SystemExit(f"--proxy-only {only} matches {len(keep)} configured proxies, not 1")
+    keep = tuple(u for u in keep if not any(x in u for x in exclude))
+    if not keep:
+        flags = " ".join(
+            [*([f"--proxy-only {only}"] if only else []), *(f"--proxy-exclude {x}" for x in exclude)]
+        )
+        raise SystemExit(f"{flags} leaves no proxy of {len(proxies)}")
+    return keep
+
+
 def choose(ps: ProxySet) -> str:
     """Pick one URL for a new run: `random`, or `round_robin` (a cursor in STATE, so consecutive runs
     rotate). Only a plan (or a single-URL set) calls this; a run reuses its plan's or record's URL."""
